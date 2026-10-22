@@ -170,6 +170,14 @@ class InternetIn(BaseModel):
     contact: str = ""
 
 
+class SandboxIn(BaseModel):
+    image: str = ""
+    memory_mb: int | None = None
+    cpus: float | None = None
+    tmpfs_mb: int | None = None
+    timeout_s: int | None = None
+
+
 class AutonomyIn(BaseModel):
     mode: str = "supervised"
     web_hosts: list[str] = []
@@ -861,6 +869,33 @@ def create_app(ctx: AppContext, *, token: str, allowed_origins: list[str] | None
             "within_limits: per-mission and per-hour caps",
             "monitor: Sentinel (no tools, never reads untrusted content) judges whether the action serves your mission",
             "destructive actions always ask; repeated denials suspend the task for your review"]}
+
+    @app.get("/api/projects/{pid}/sandbox")
+    async def get_sandbox(pid: str):
+        from ..tools.sandbox import DEFAULT_PROFILE, project_profile
+
+        if db.one("SELECT 1 FROM projects WHERE id = ?", (pid,)) is None:
+            raise KeyError(pid)
+        prof = project_profile(db, pid)
+        ok, why = await ctx.sandbox.available(refresh=True, image=prof["image"])
+        return {**prof, "default": DEFAULT_PROFILE, "available": ok, "detail": why,
+                "fixed": ["no network", "worktree mounted read-only", "no new privileges", "process limit 512"]}
+
+    @app.put("/api/projects/{pid}/sandbox")
+    async def put_sandbox(pid: str, body: SandboxIn):
+        from ..tools.sandbox import clean_profile
+
+        prof = clean_profile(body.model_dump())  # raises ValueError on a bad image name
+        with db.tx() as cur:
+            p = cur.execute("SELECT settings_json FROM projects WHERE id = ?", (pid,)).fetchone()
+            if p is None:
+                raise KeyError(pid)
+            s = loads(p["settings_json"], {})
+            s["sandbox"] = prof
+            cur.execute("UPDATE projects SET settings_json = ? WHERE id = ?", (dumps(s), pid))
+            emit(cur, "sandbox.profile_changed", "owner", prof, project_id=pid)
+        sup._sandbox_checked_at = 0.0  # re-check availability on the next tick
+        return await get_sandbox(pid)
 
     @app.put("/api/projects/{pid}/autonomy")
     async def put_autonomy(pid: str, body: AutonomyIn):

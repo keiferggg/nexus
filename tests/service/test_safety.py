@@ -2,6 +2,7 @@
 permission isolation, prompt injection, provider failures."""
 import asyncio
 import json
+import os
 import shutil
 import threading
 from pathlib import Path
@@ -155,7 +156,11 @@ async def test_project_isolation_for_memory_and_workspace(ctx, tmp_path):
                        allowed_tools=expand_capabilities(ctx.broker, ["read_workspace"]))
     for path in ["../B/secret-plan.md", str(b_root / "secret-plan.md"), "..\\B\\secret-plan.md"]:
         res = await ctx.broker.invoke(tctx, "read_file", {"path": path}, operation_id=f"op-{path}")
-        assert not res["ok"] and "escapes" in res["error"], res
+        assert not res["ok"], res
+        # On POSIX a backslash is an ordinary filename character: that path names a file that does not exist
+        # inside A (still denied) rather than a path that escapes it.
+        if "/" in path or os.sep == "\\":
+            assert "escapes" in res["error"], res
     (a_root / ".env").write_text("OPENAI_API_KEY=sk-x")
     res = await ctx.broker.invoke(tctx, "read_file", {"path": ".env"}, operation_id="op-env")
     assert not res["ok"] and "credential-like" in res["error"]

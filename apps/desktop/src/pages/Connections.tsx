@@ -2,6 +2,7 @@ import { useState } from "react";
 import { del, post, put, timeAgo, useApi } from "../api";
 import { AutonomyPanel } from "../components/Autonomy";
 import { InternetPanel } from "../components/Internet";
+import { SandboxPanel } from "../components/Sandbox";
 import { Badge, Button, Card, Field, Load, Mono, Status } from "../components/ui";
 
 const TEMPLATES: Record<string, { label: string; config: any; secretLabel: string; help: string }> = {
@@ -34,6 +35,7 @@ export default function Connections({ project }: { project: any }) {
       <div className="col gap-lg">
         <AutonomyPanel projectId={project.id} />
         <InternetPanel projectId={project.id} />
+        <SandboxPanel projectId={project.id} />
         <Card title="Action requests" id="ar" flush>
           <Load q={acts} empty={(d) => (d.length ? null : "No action has been requested yet")}>{(rows) => (
             <table className="data"><thead><tr><th>Action</th><th>Requested by / why</th><th>Status</th><th /></tr></thead><tbody>

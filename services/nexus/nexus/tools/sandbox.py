@@ -3,21 +3,59 @@
 Workers never receive the Docker socket or host mounts: the *host* launches a container with
 only the task worktree mounted read-only, no network, bounded CPU/memory/pids and a timeout.
 If prerequisites are missing the capability is reported as unavailable and code is not run.
+
+Each project may choose a sandbox *profile* (project settings "sandbox"): a different image (e.g. one with the
+project's dependencies preinstalled) and larger limits. The isolation flags (no network, read-only worktree,
+no new privileges, pid limit) are not configurable.
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
 import shutil
+import uuid
 from pathlib import Path
 from typing import Any
 
+DEFAULT_PROFILE: dict[str, Any] = {"image": "python:3.12-slim", "memory_mb": 512, "cpus": 1.0, "tmpfs_mb": 64,
+                                   "timeout_s": 180}
+LIMITS = {"memory_mb": (128, 8192), "cpus": (0.25, 8.0), "tmpfs_mb": (16, 4096), "timeout_s": (10, 1800)}
+IMAGE_RE = re.compile(r"^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?$")
+
+
+def clean_profile(raw: dict[str, Any] | None) -> dict[str, Any]:
+    """Validated profile: unknown keys dropped, numbers clamped, image names checked (never a docker flag)."""
+    p = dict(DEFAULT_PROFILE)
+    raw = raw or {}
+    img = str(raw.get("image") or "").strip()
+    if img:
+        if not IMAGE_RE.match(img):
+            raise ValueError(f"invalid image name {img!r}")
+        p["image"] = img
+    for k, (lo, hi) in LIMITS.items():
+        if raw.get(k) not in (None, ""):
+            p[k] = min(max(float(raw[k]), lo), hi)
+            if k != "cpus":
+                p[k] = int(p[k])
+    return p
+
+
+def project_profile(db, project_id: str | None) -> dict[str, Any]:
+    from ..persistence.db import loads
+
+    row = db.one("SELECT settings_json FROM projects WHERE id = ?", (project_id,)) if project_id else None
+    try:
+        return clean_profile((loads(row["settings_json"], {}) if row else {}).get("sandbox"))
+    except ValueError:
+        return dict(DEFAULT_PROFILE)
+
 
 class DockerSandbox:
-    def __init__(self, image: str = "python:3.12-slim", docker_bin: str | None = None):
+    def __init__(self, image: str = DEFAULT_PROFILE["image"], docker_bin: str | None = None):
         self.image = image
         self.docker = docker_bin or shutil.which("docker")
-        self._cached: tuple[bool, str] | None = None
+        self._cached: dict[str, tuple[bool, str]] = {}
 
     async def _run(self, *args: str, timeout: float) -> tuple[int, str, str]:
         proc = await asyncio.create_subprocess_exec(self.docker, *args, stdout=asyncio.subprocess.PIPE,
@@ -30,45 +68,50 @@ class DockerSandbox:
             return 124, "", "timeout"
         return proc.returncode or 0, out.decode(errors="replace"), err.decode(errors="replace")
 
-    async def available(self, refresh: bool = False) -> tuple[bool, str]:
-        if self._cached and not refresh:
-            return self._cached
+    async def available(self, refresh: bool = False, image: str | None = None) -> tuple[bool, str]:
+        image = image or self.image
+        if image in self._cached and not refresh:
+            return self._cached[image]
         if not self.docker:
-            self._cached = (False, "docker CLI not found on PATH")
-            return self._cached
+            return self._cached.setdefault(image, (False, "docker CLI not found on PATH"))
         rc, out, err = await self._run("info", "--format", "{{.ServerVersion}}", timeout=15)
+        if rc != 0:  # not cached: Docker Desktop may simply not be started yet
+            return False, "docker daemon not reachable (is Docker Desktop running?)"
+        rc, _, _ = await self._run("image", "inspect", image, timeout=15)
         if rc != 0:
-            self._cached = (False, "docker daemon not reachable (is Docker Desktop running?)")
-            return self._cached
-        rc, _, _ = await self._run("image", "inspect", self.image, timeout=15)
-        if rc != 0:
-            self._cached = (False, f"sandbox image '{self.image}' not present locally; pull it explicitly:"
-                                   f" docker pull {self.image}")
-            return self._cached
-        self._cached = (True, f"docker {out.strip()} image {self.image}")
-        return self._cached
+            return False, f"sandbox image '{image}' not present locally; pull or build it explicitly"
+        self._cached[image] = (True, f"docker {out.strip()} image {image}")
+        return self._cached[image]
 
-    async def run(self, worktree: Path, command: list[str], *, timeout_s: float = 120) -> dict[str, Any]:
-        ok, why = await self.available()
+    async def run(self, worktree: Path, command: list[str], *, timeout_s: float | None = None,
+                  profile: dict[str, Any] | None = None) -> dict[str, Any]:
+        p = clean_profile(profile) if profile else {**DEFAULT_PROFILE, "image": self.image}
+        timeout = float(timeout_s if timeout_s is not None else p["timeout_s"])
+        ok, why = await self.available(image=p["image"])
         if not ok:
             raise RuntimeError(f"sandbox unavailable: {why}")
         if not all(isinstance(c, str) for c in command) or not command:
             raise ValueError("command must be a non-empty list of strings")
-        args = ["run", "--rm", "--network", "none", "--memory", "512m", "--cpus", "1", "--pids-limit", "256",
-                "--read-only", "--tmpfs", "/tmp:rw,size=64m", "--security-opt", "no-new-privileges",
+        name = f"nexus-sbx-{uuid.uuid4().hex[:12]}"
+        args = ["run", "--rm", "--name", name, "--network", "none", "--memory", f"{p['memory_mb']}m",
+                "--cpus", str(p["cpus"]), "--pids-limit", "512", "--read-only",
+                "--tmpfs", f"/tmp:rw,exec,size={p['tmpfs_mb']}m", "--security-opt", "no-new-privileges",
                 "-e", "PYTHONDONTWRITEBYTECODE=1", "-v", f"{Path(worktree).resolve()}:/work:ro", "-w", "/work",
-                self.image, *command]
-        rc, out, err = await self._run(*args, timeout=timeout_s)
+                p["image"], *command]
+        rc, out, err = await self._run(*args, timeout=timeout)
+        if rc == 124 and err == "timeout":
+            await self._run("kill", name, timeout=15)  # killing the CLI does not stop the container
         return {"exit_code": rc, "stdout": out[-20000:], "stderr": err[-20000:], "timed_out": rc == 124,
-                "passed": rc == 0, "sandbox": f"docker:{self.image}"}
+                "passed": rc == 0, "sandbox": f"docker:{p['image']}"}
 
 
 class UnavailableSandbox:
     def __init__(self, reason: str):
         self.reason = reason
 
-    async def available(self, refresh: bool = False) -> tuple[bool, str]:
+    async def available(self, refresh: bool = False, image: str | None = None) -> tuple[bool, str]:
         return False, self.reason
 
-    async def run(self, worktree: Path, command: list[str], *, timeout_s: float = 120) -> dict[str, Any]:
+    async def run(self, worktree: Path, command: list[str], *, timeout_s: float | None = None,
+                  profile: dict[str, Any] | None = None) -> dict[str, Any]:
         raise RuntimeError(f"sandbox unavailable: {self.reason}")

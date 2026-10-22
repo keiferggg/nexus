@@ -59,7 +59,7 @@ class Verifier:
             if kind == "reviewer":
                 result, reviewer, independence = await self._model_review(task, s, content, attempt, item)
             elif kind == "sandbox_command":
-                result, reviewer, independence = await self._sandbox(check, worktree, meta), "nexus:sandbox", "deterministic"
+                result, reviewer, independence = await self._sandbox(check, worktree, meta, task["project_id"]), "nexus:sandbox", "deterministic"
             elif kind == "owner_approval":
                 result, reviewer, independence = self._owner_approval(s, crit), "owner", "owner"
             else:
@@ -79,15 +79,18 @@ class Verifier:
                                                 limitations=limitations))
         return review_ids
 
-    async def _sandbox(self, check, worktree: Path | None, meta) -> dict[str, Any]:
-        ok, why = await self.ctx.sandbox.available()
+    async def _sandbox(self, check, worktree: Path | None, meta, project_id: str | None = None) -> dict[str, Any]:
+        from ..tools.sandbox import project_profile
+
+        profile = project_profile(self.ctx.db, project_id)
+        ok, why = await self.ctx.sandbox.available(image=profile["image"])
         if not ok:
             return {"verdict": "inconclusive", "summary": f"sandbox unavailable: {why}",
                     "limitation": "code was not executed; behavior unverified"}
         if worktree is None:
             return {"verdict": "inconclusive", "summary": "no worktree"}
         cmd = (check.get("args") or {}).get("command") or meta.get("test_command") or ["python", "-m", "pytest", "-q"]
-        res = await self.ctx.sandbox.run(worktree, cmd, timeout_s=180)
+        res = await self.ctx.sandbox.run(worktree, cmd, profile=profile)
         return {"verdict": "pass" if res["passed"] else "fail",
                 "summary": f"exit {res['exit_code']}{' (timeout)' if res['timed_out'] else ''}", "details": res}
 

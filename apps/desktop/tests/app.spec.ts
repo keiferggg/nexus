@@ -280,3 +280,24 @@ test("setup wizard: choosing Unattended and Read and write sticks without pressi
     await app.close();
   }
 });
+
+test("code sandbox profile: bad image refused, valid profile saved per project", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nexus-ui-"));
+  const { app, page } = await launch(path.join(root, "data"));
+  try {
+    await demoProject(page);
+    await page.getByRole("button", { name: "Connected services" }).click();
+    const card = page.getByRole("region", { name: "Code sandbox" });
+    await card.getByLabel("Image").fill("--privileged");
+    await card.getByRole("button", { name: "Save sandbox" }).click();
+    await expect(card.getByRole("alert")).toContainText("invalid image name");
+    await card.getByLabel("Image").fill("nexus-sandbox:py312");
+    await card.getByLabel("Time limit per run (s)").fill("900");
+    await expect(card.getByText("Unsaved changes")).toBeVisible();
+    await card.getByRole("button", { name: "Save sandbox" }).click();
+    await expect(card.getByText("Saved", { exact: true })).toBeVisible();
+    await expect(card.getByText("nexus-sandbox:py312", { exact: true })).toBeVisible();
+  } finally {
+    await app.close();
+  }
+});

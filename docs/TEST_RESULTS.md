@@ -246,3 +246,20 @@ Total live spend across all missions: $1.56 (by owner-configured prices; not inv
 - Test: test_truncation_retry_is_learned_so_later_missions_do_not_repeat_it (DeepSeek simulator: the first mission
   retries the plan; a second mission makes no retries for any purpose already learned). Service suite: 84 passed,
   16 opt-in skipped. Version comparison checked: the updater compares numerically, so 0.2.10 > 0.2.9.
+
+## 0.2.11 — per-project code sandbox profiles (NEXUS developing NEXUS)
+- Each project can now choose a sandbox profile (Connected services → Code sandbox): the image, memory, CPUs, /tmp size
+  and time limit per run. The isolation flags are fixed and not configurable: `--network none`, worktree mounted
+  read-only, `no-new-privileges`, pid limit. Image names are validated, so a value such as `--privileged` cannot be
+  passed to docker as a flag (UI test "code sandbox profile: bad image refused…"). A run that times out now kills its
+  container by name; before, only the docker CLI process was killed.
+- Sandbox availability is checked per project image, once a minute, so starting Docker Desktop or building an image
+  takes effect without restarting NEXUS.
+- `services/nexus/packaging/sandbox.Dockerfile` builds `nexus-sandbox:py312`: Python 3.12, git, NEXUS's dependencies
+  and pytest preinstalled; the code under test is not baked into the image, and `PYTHONPATH` points at the mounted
+  worktree.
+- Verified: the full service suite was run *through `DockerSandbox.run`* (2 GB, 2 CPUs, 1 GB /tmp, no network,
+  read-only repository): **84 passed, 16 skipped in about 40 s**. The first run found one platform-dependent
+  assertion: on Linux, `..\B\secret-plan.md` is an ordinary (nonexistent) filename, so it is denied as "not a file"
+  rather than "escapes". The test now asserts the denial on every OS, and the escape message only where `\` is a
+  separator. Windows: 84 passed; desktop app tests: 6 passed.

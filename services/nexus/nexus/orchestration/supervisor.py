@@ -255,7 +255,8 @@ def post_accept(sup: "Supervisor", cur, t, submission_id: str, *, meta: dict[str
             link(cur, "task", dep["id"], "task", t["id"])
     if t["kind"] == "plan":
         plan = json.loads(sup.ctx.artifacts.read_text(artifact_id))
-        materialize_plan(cur, plan_task_id=t["id"], plan=plan, sandbox_ok=sup.sandbox_ok,
+        materialize_plan(cur, plan_task_id=t["id"], plan=plan,
+                         sandbox_ok=sup.sandbox_ok_by_project.get(t["project_id"], sup.sandbox_ok),
                          base_commit=sup.base_commits.get(t["project_id"]))
     acc = cur.execute("SELECT id FROM acceptances WHERE submission_id = ?", (submission_id,)).fetchone()
     mem_id = new_id("mem")
@@ -286,6 +287,8 @@ class Supervisor:
         self._loop_task: asyncio.Task | None = None
         self._stop = asyncio.Event()
         self.sandbox_ok = False
+        self.sandbox_ok_by_project: dict[str, bool] = {}  # projects may use their own sandbox image
+        self._sandbox_checked_at = 0.0
         self.base_commits: dict[str, str] = {}
         self.last_error: str | None = None
 
@@ -406,7 +409,22 @@ class Supervisor:
         return r["checkpoint_id"]
 
     # ---- scheduling ------------------------------------------------------------------------
+    async def refresh_sandbox_status(self) -> None:
+        """Per-project sandbox availability (each project's profile may name a different image). At most once a
+        minute: a missing image or a stopped Docker Desktop is re-checked without restarting NEXUS."""
+        import time
+
+        from ..tools.sandbox import project_profile
+
+        if time.monotonic() - self._sandbox_checked_at < 60:
+            return
+        self._sandbox_checked_at = time.monotonic()
+        for p in self.ctx.db.query("SELECT id FROM projects"):
+            image = project_profile(self.ctx.db, p["id"])["image"]
+            self.sandbox_ok_by_project[p["id"]] = (await self.ctx.sandbox.available(image=image))[0]
+
     async def tick(self) -> None:
+        await self.refresh_sandbox_status()
         if self.ctx.services is not None:
             from ..connectors.service import ensure_web_connector
 

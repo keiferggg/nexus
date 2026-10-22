@@ -157,11 +157,13 @@ async def run_tests(broker, ctx: ToolContext, args: dict[str, Any]) -> Any:
     sb = broker.sandbox
     if sb is None:
         raise ToolDenied("no sandbox configured")
-    ok, why = await sb.available()
+    from .sandbox import project_profile
+
+    profile = project_profile(broker.db, ctx.project_id)
+    ok, why = await sb.available(image=profile["image"])
     if not ok:
         raise ToolDenied(f"sandbox unavailable: {why}. Code is never executed unsandboxed.")
-    res = await sb.run(_wt(ctx), args.get("command") or ["python", "-m", "pytest", "-q"], timeout_s=120)
-    return res
+    return await sb.run(_wt(ctx), args.get("command") or ["python", "-m", "pytest", "-q"], profile=profile)
 
 
 async def http_post(broker, ctx: ToolContext, args: dict[str, Any]) -> Any:
