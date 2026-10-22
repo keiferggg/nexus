@@ -1,0 +1,33 @@
+{
+  "name": "nexus-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NEXUS desktop workbench",
+  "author": "NEXUS",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "build:renderer": "vite build",
+    "build": "npm run build:electron && npm run build:renderer",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "dev": "npm run build:electron && electron .",
+    "start": "npm run build && electron .",
+    "test:ui": "npm run build && playwright test",
+    "dist:win": "npm run build && node scripts/build-service.mjs && node scripts/build-installer.mjs"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "25.9.9",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "electron": "44.6.0",
+    "electron-builder": "26.15.3",
+    "typescript": "6.0.3",
+    "vite": "8.3.3"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "_note": "DEMO FIXTURE: scripted outputs for the deterministic fake engineer/integrator. Not generated code.",
+  "slugify": {
+    "textkit/textutils.py": "\"\"\"Text helpers (DEMO FIXTURE).\"\"\"\n\n\ndef normalize_space(text: str) -> str:\n    return \" \".join(text.split())\n\n# --- helpers added below ---\n\n\ndef slugify(text: str) -> str:\n    import re\n    text = normalize_space(text).lower()\n    return re.sub(r\"[^a-z0-9]+\", \"-\", text).strip(\"-\")\n",
+    "tests/test_slugify.py": "from textkit.textutils import slugify\n\n\ndef test_slugify():\n    assert slugify(\"Hello,  World!\") == \"hello-world\"\n"
+  },
+  "truncate": {
+    "textkit/textutils.py": "\"\"\"Text helpers (DEMO FIXTURE).\"\"\"\n\n\ndef normalize_space(text: str) -> str:\n    return \" \".join(text.split())\n\n# --- helpers added below ---\n\n\ndef truncate(text: str, n: int) -> str:\n    text = normalize_space(text)\n    return text if len(text) <= n else text[: max(0, n - 1)] + \"\u2026\"\n",
+    "tests/test_truncate.py": "from textkit.textutils import truncate\n\n\ndef test_truncate():\n    assert truncate(\"abcdef\", 4) == \"abc\u2026\"\n    assert truncate(\"ab\", 4) == \"ab\"\n"
+  },
+  "_resolutions": {
+    "textkit/textutils.py": "\"\"\"Text helpers (DEMO FIXTURE).\"\"\"\n\n\ndef normalize_space(text: str) -> str:\n    return \" \".join(text.split())\n\n# --- helpers added below ---\n\n\ndef slugify(text: str) -> str:\n    import re\n    text = normalize_space(text).lower()\n    return re.sub(r\"[^a-z0-9]+\", \"-\", text).strip(\"-\")\n\n\ndef truncate(text: str, n: int) -> str:\n    text = normalize_space(text)\n    return text if len(text) <= n else text[: max(0, n - 1)] + \"\u2026\"\n"
+  }
+}

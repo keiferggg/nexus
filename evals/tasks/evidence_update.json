@@ -1,0 +1,11 @@
+{
+  "id": "evidence-update",
+  "kind": "research",
+  "workspace": "demo-research",
+  "objective": "Brief the Larkspur council on a bike-share pilot",
+  "success_conditions": ["Research resident demand using workspace sources", "Write a one-page recommendation for the council"],
+  "constraints": ["Use only workspace sources"],
+  "evidence_update": {"withdraw_locator": "sources/regional-news.md"},
+  "scoring": {"required_facts": ["812"], "min_independent_sources": 2, "require_quotes": false,
+              "forbidden": ["Regional Gazette"]}
+}

@@ -1,0 +1,73 @@
+{
+  "label": "offline-fake",
+  "created_at": "20261022T000155Z",
+  "repeats": 1,
+  "summary": [
+    {
+      "mode": "nexus",
+      "runs": 2,
+      "accepted": 2,
+      "mean_score": 1.0,
+      "stdev_score": 0.0,
+      "usd_per_accepted": 0.0,
+      "mean_elapsed_s": 0.43,
+      "mean_model_calls": 16
+    }
+  ],
+  "runs": [
+    {
+      "task": "evidence-update",
+      "mode": "nexus",
+      "status": "completed",
+      "accepted": true,
+      "error": null,
+      "elapsed_s": 0.56,
+      "model_calls": 20,
+      "spend_usd": 0.0,
+      "owner_interventions": 9,
+      "recovery": {
+        "reopened_tasks": 3,
+        "status_after": "completed"
+      },
+      "score": 1.0,
+      "checks": {
+        "facts": 1.0,
+        "independent_sources": 1.0,
+        "quote_accuracy": 1.0,
+        "no_forbidden": 1.0
+      },
+      "cited_lineages": [
+        "file:sources/council-minutes.md",
+        "survey:larkspur-transit-2026"
+      ],
+      "forbidden_found": [],
+      "repeat": 0
+    },
+    {
+      "task": "research-brief",
+      "mode": "nexus",
+      "status": "completed",
+      "accepted": true,
+      "error": null,
+      "elapsed_s": 0.3,
+      "model_calls": 12,
+      "spend_usd": 0.0,
+      "owner_interventions": 1,
+      "recovery": null,
+      "score": 1.0,
+      "checks": {
+        "facts": 1.0,
+        "independent_sources": 1.0,
+        "quote_accuracy": 1.0,
+        "no_forbidden": 1.0
+      },
+      "cited_lineages": [
+        "file:sources/council-minutes.md",
+        "survey:larkspur-transit-2026"
+      ],
+      "forbidden_found": [],
+      "repeat": 0
+    }
+  ],
+  "caveat": "OFFLINE SCRIPTED FAKE: agent outputs are scripted, so differences reflect NEXUS's checks and repair loop acting on scripted behavior, not model or swarm quality."
+}

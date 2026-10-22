@@ -1,0 +1,26 @@
+appId: local.nexus.desktop
+productName: NEXUS
+copyright: Local build
+directories:
+  output: installer
+  buildResources: build
+files:
+  - dist/**
+  - dist-electron/**
+  - package.json
+extraResources:
+  - from: ../../services/nexus/dist/nexus-service
+    to: nexus-service
+asar: true
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.png
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: NEXUS
+  artifactName: NEXUS-Setup-${version}.${ext}
