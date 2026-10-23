@@ -15,7 +15,7 @@ export default function Control({ m, reload }: { m: any; reload: () => void }) {
       <div className="col gap-lg">
         <Card title="Success conditions" id="sc-h">
           <table className="data"><tbody>{scs.map((sc) => {
-            const ts = tasks.filter((t) => t.cause?.addresses === sc.id && !["superseded", "canceled"].includes(t.status));
+            const ts = tasks.filter((t) => (Array.isArray(t.cause?.addresses) ? t.cause.addresses.includes(sc.id) : t.cause?.addresses === sc.id) && !["superseded", "canceled"].includes(t.status));
             const done = ts.length > 0 && ts.every((t) => t.status === "accepted" && !t.is_stale);
             return (
               <tr key={sc.id}><td className="mono small" style={{ width: 40 }}>{sc.id}</td><td>{sc.text}</td>

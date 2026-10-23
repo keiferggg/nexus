@@ -19,7 +19,7 @@ from typing import Any
 
 from ..domain.missions import add_task, agent_for_role, current_revision
 from ..domain.understanding import add_assumption, add_prediction, add_uncertainty, link
-from ..domain.verification import ROLE_FOR_KIND, build_verification_plan
+from ..domain.verification import ROLE_FOR_KIND, addressed, build_verification_plan
 from ..persistence.db import dumps, loads, now_iso
 from ..persistence.events import emit
 
@@ -113,7 +113,8 @@ def materialize_plan(cur: sqlite3.Cursor, *, plan_task_id: str | None, plan: dic
     for t in tasks:  # topological order not required: dependencies inserted after all tasks exist
         key = t["key"] if t["key"] not in existing else f"{t['key']}-r{rev['revision']}"
         acceptance = list(t.get("acceptance", []))
-        sc_text = next((c["text"] for c in rev["success_conditions"] if c.get("id") == t.get("addresses")), None)
+        addr = addressed(t)
+        sc_text = " ".join(c["text"] for c in rev["success_conditions"] if c.get("id") in addr) or None
         intent = external_write_intent(t.get("title"), sc_text)
         if intent and t["kind"] in ("write", "integrate", "research", "check"):
             # Only act tasks can call connectors, and only actions_settled proves the effect happened. Seen live: a

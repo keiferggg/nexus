@@ -110,11 +110,13 @@ def why_running(db: Database, task_id: str) -> list[dict[str, Any]]:
     chain = []
     rev = db.one("SELECT * FROM mission_revisions WHERE mission_id = ? AND revision = ?", (t["mission_id"], cause.get(
         "revision") or t["mission_revision"]))
-    if cause.get("addresses") and rev:
-        sc = next((c for c in loads(rev["success_conditions_json"], []) if c["id"] == cause["addresses"]), None)
-        chain.append({"kind": "success_condition", "ref": cause["addresses"],
-                      "text": sc["text"] if sc else ("combine accepted work" if cause["addresses"] == "integration"
-                                                     else cause["addresses"])})
+    addrs = cause.get("addresses")
+    for addr in ([addrs] if isinstance(addrs, str) else addrs if isinstance(addrs, list) else []):
+        if not rev or addr in ("objective", "mission_revision"):
+            continue
+        sc = next((c for c in loads(rev["success_conditions_json"], []) if c["id"] == addr), None)
+        chain.append({"kind": "success_condition", "ref": addr,
+                      "text": sc["text"] if sc else ("combine accepted work" if addr == "integration" else addr)})
     if cause.get("addresses") == "objective" and rev:
         chain.append({"kind": "objective", "text": rev["objective"]})
     if cause.get("addresses") == "mission_revision":

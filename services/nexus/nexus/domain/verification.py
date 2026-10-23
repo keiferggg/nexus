@@ -29,6 +29,16 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip().lower()
 
 
+def addressed(t: dict[str, Any]) -> list[str]:
+    """Success conditions a planned task addresses: one id, or several (models often address two at once)."""
+    a = t.get("addresses")
+    if isinstance(a, str):
+        return [a]
+    if isinstance(a, list):
+        return [x for x in a if isinstance(x, str)]
+    return []
+
+
 def validate_plan(plan: Any, *, success_condition_ids: list[str], constraint_ids: list[str],
                   max_tasks: int = 16) -> list[str]:
     errs: list[str] = []
@@ -63,19 +73,27 @@ def validate_plan(plan: Any, *, success_condition_ids: list[str], constraint_ids
                 ck = (a.get("check") or {}).get("kind") if isinstance(a, dict) else None
                 if ck not in CHECK_KINDS - {"plan_schema"}:
                     errs.append(f"task {k}: acceptance check kind {ck!r} unknown")
-        for c in t.get("constraint_ids", []) or []:
+        cids = t.get("constraint_ids", []) or []
+        if not isinstance(cids, list) or not all(isinstance(c, str) for c in cids):
+            errs.append(f"task {k}: constraint_ids must be a list of ids")
+            cids = []
+        for c in cids:
             if c not in constraint_ids:
                 errs.append(f"task {k}: unknown constraint id {c}")
-        addr = t.get("addresses")
-        if addr is not None and addr not in success_condition_ids and addr != "integration":
-            errs.append(f"task {k}: addresses unknown success condition {addr}")
+        for addr in addressed(t):
+            if addr not in success_condition_ids and addr != "integration":
+                errs.append(f"task {k}: addresses unknown success condition {addr!r}")
+        deps = t.get("depends_on", []) or []
+        if not isinstance(deps, list) or not all(isinstance(d, str) for d in deps):
+            errs.append(f"task {k}: depends_on must be a list of task keys")
     for t in tasks:
-        if isinstance(t, dict):
-            for d in t.get("depends_on", []) or []:
-                if d not in keys:
+        if isinstance(t, dict) and isinstance(t.get("depends_on"), list):
+            for d in t["depends_on"]:
+                if isinstance(d, str) and d not in keys:
                     errs.append(f"task {t.get('key')}: depends on unknown task {d}")
     # cycle check
-    graph = {t["key"]: list(t.get("depends_on") or []) for t in tasks if isinstance(t, dict) and isinstance(t.get("key"), str)}
+    graph = {t["key"]: [d for d in (t.get("depends_on") or []) if isinstance(d, str)]
+             for t in tasks if isinstance(t, dict) and isinstance(t.get("key"), str) and isinstance(t.get("depends_on") or [], list)}
     state: dict[str, int] = {}
 
     def visit(n: str, stack: list[str]) -> None:
@@ -92,7 +110,7 @@ def validate_plan(plan: Any, *, success_condition_ids: list[str], constraint_ids
 
     for n in graph:
         visit(n, [])
-    covered = {t.get("addresses") for t in tasks if isinstance(t, dict)}
+    covered = {a for t in tasks if isinstance(t, dict) for a in addressed(t)}
     for sc in success_condition_ids:
         if sc not in covered:
             errs.append(f"success condition {sc} is not addressed by any task")
@@ -109,7 +127,10 @@ def run_check(cur: sqlite3.Cursor, check: dict[str, Any], *, content: str, missi
             plan = json.loads(content)
         except json.JSONDecodeError as exc:
             return {"verdict": "fail", "summary": f"plan is not valid JSON: {exc}", "details": {}}
-        errs = validate_plan(plan, **(plan_context or {"success_condition_ids": [], "constraint_ids": []}))
+        try:
+            errs = validate_plan(plan, **(plan_context or {"success_condition_ids": [], "constraint_ids": []}))
+        except Exception as exc:  # a malformed plan must come back as repair feedback, never crash the attempt
+            errs = [f"plan has an unexpected structure ({type(exc).__name__}: {exc}); follow REQUIRED OUTPUT exactly"]
         return {"verdict": "fail" if errs else "pass", "summary": "; ".join(errs[:6]) or "plan valid",
                 "details": {"errors": errs}}
     if kind == "min_words":

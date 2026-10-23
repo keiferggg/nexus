@@ -35,6 +35,9 @@ class ToolLoopExceeded(Exception):
 
 
 DEFAULT_OUTPUT_TOKENS = 8192
+# Tool rounds per task kind before the final no-tools answer. Code work in a real repository needs room to explore,
+# edit and run tests; planning should stay brief (details belong to the tasks it creates).
+TOOL_ROUNDS = {"plan": 8, "code": 30, "research": 16, "write": 12, "act": 12, "discover": 12, "check": 12, "integrate": 6}
 LEGACY_OUTPUT_DEFAULT = 2048
 
 
@@ -192,16 +195,24 @@ class TaskWorker:
         tools = self.ctx.broker.specs_for(tool_ctx) if tool_ctx else []
         messages = [ChatMessage("user", f"{packet_text}\n\n{instruction}")]
         base = f"{self.attempt['attempt_id']}:r{round}:{step}"
-        for i in range(self.max_tool_rounds):
+        budget = self.max_tool_rounds if self.max_tool_rounds != 8 else TOOL_ROUNDS.get(task["kind"], 8)
+        for i in range(budget + 1):
             self._fence()
+            # Out of exploration budget: one last turn with tools disabled to answer from what was learned. Seen live:
+            # a planner exploring a large repository was abandoned three times after 8 rounds without ever answering.
+            final = bool(tools) and i == budget
+            if final:
+                messages.append(ChatMessage("user", "You have used your tool budget. Do not call any more tools: return"
+                                                    " the required JSON now, based on what you have already learned."))
             req = CompletionRequest(model=policy["model"], system=system, messages=list(messages),
                                     max_output_tokens=int(policy.get("max_output_tokens", DEFAULT_OUTPUT_TOKENS)), tools=tools,
+                                    tool_choice="none" if final else None,
                                     response_json=True, metadata={"purpose": step, "role": agent["role_default"] if agent else None,
                                                                   "round": round, "task_kind": task["kind"]})
             out = await self._call(req, op=f"{base}:{i}", purpose=step, policy=policy, task=task, agent=agent,
                                    context_artifact_id=context_artifact_id, category=category)
             res = out.result
-            if res.tool_calls:
+            if res.tool_calls and not final:
                 messages.append(ChatMessage("assistant", res.text, tool_calls=res.tool_calls, reasoning=res.reasoning))
                 for j, tc in enumerate(res.tool_calls):
                     r = await self.ctx.broker.invoke(tool_ctx, tc.name, tc.arguments, operation_id=f"{base}:{i}:tool:{j}") \
@@ -217,6 +228,7 @@ class TaskWorker:
                                                     " with ONLY the JSON object described in REQUIRED OUTPUT."))
                 req2 = CompletionRequest(model=policy["model"], system=system, messages=list(messages),
                                          max_output_tokens=int(policy.get("max_output_tokens", DEFAULT_OUTPUT_TOKENS)),
+                                         tools=tools, tool_choice="none" if tools else None,
                                          response_json=True, metadata={**req.metadata, "purpose": f"{step}:repair"})
                 out2 = await self._call(req2, op=f"{base}:{i}:repair", purpose=f"{step}:repair", policy=policy, task=task,
                                         agent=agent, context_artifact_id=context_artifact_id, category=category)
@@ -264,7 +276,8 @@ class TaskWorker:
         text, ctx_id = self._store_packet(task, sections, round)
         system = roles.system_prompt("planner", agent["charter"] if agent else "", roles.PLAN_OUTPUT)
         plan = await self._loop(task=task, mission=mission, project=project, agent=agent, policy=policy, system=system,
-                                packet_text=text, instruction="Produce the plan now.",
+                                packet_text=text, instruction="Produce the plan now. Explore only as much as you need to plan"
+                                " (a few tool calls at most); detailed reading and changes belong to the tasks you create.",
                                 tool_ctx=self._tool_ctx(project, task, agent), round=round, step="plan",
                                 context_artifact_id=ctx_id)
         with self.ctx.db.tx() as cur:

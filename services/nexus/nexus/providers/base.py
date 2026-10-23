@@ -69,6 +69,7 @@ class CompletionRequest:
     response_json: bool = False
     temperature: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)  # purpose/role; never sent to the provider
+    tool_choice: str | None = None  # "none": tools stay declared (history references them) but must not be called
 
 
 @dataclass

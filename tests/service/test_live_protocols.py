@@ -186,3 +186,50 @@ async def test_work_written_by_the_only_reviewer_is_reviewed_by_another_agent(li
     pick = Verifier(c)._pick_reviewer({"project_id": proj, "agent_id": reviewer})
     assert pick is not None and pick["id"] != reviewer and pick["role_default"] not in ("reviewer", "guardian")
     assert pick["role_default"] == "planner"
+
+
+async def test_explorer_that_never_stops_gets_a_final_no_tools_turn(live):
+    """Seen live: a planner kept reading files on a large repository until 'tool loop exceeded 8 rounds', three times.
+    Now the last turn disables tools (tool_choice none) and the agent answers from what it has learned."""
+    c, sup = live
+    pid, model, _ = configure(c, "deepseek")
+    seen_none = []
+
+    def explorer(req, packet):
+        from nexus.demo.script import demo_script
+
+        if req.metadata.get("purpose") == "plan" and getattr(req, "tool_choice", None) != "none":
+            return {"__tool_calls__": [{"name": "list_files", "arguments": {}}]}  # would explore forever
+        return demo_script(req, packet)
+
+    class Sim(ProviderSim):
+        def _parse_openai(self, b, request):
+            req = super()._parse_openai(b, request)
+            req.tool_choice = b.get("tool_choice")
+            if req.tool_choice == "none":
+                seen_none.append(True)
+            return req
+
+    sim = Sim("deepseek", brain=explorer)
+    c.registry.register_override(pid, SETUPS["deepseek"][0](sim))
+    proj = create_demo_project(c, "research")
+    mid = new_mission(c, proj, mode="live", cap=1.0)
+    status = await sup.wait_idle(mid, timeout=90)
+    assert status == "completed", ({k: (v["status"], v["status_reason"]) for k, v in tasks(c, mid).items()}, sim.violations[:3])
+    assert seen_none, "the final turn must forbid tool calls"
+    plan_calls = c.db.query("SELECT operation_id FROM model_calls WHERE mission_id = ? AND purpose = 'plan'", (mid,))
+    assert len(plan_calls) == 9  # 8 exploring rounds + 1 final answer
+
+
+def test_plan_addressing_several_conditions_is_valid_and_malformed_plans_never_crash():
+    from nexus.domain.verification import validate_plan
+
+    plan = {"tasks": [{"key": "do-both", "title": "t", "kind": "write", "description": "d", "addresses": ["SC1", "SC2"],
+                       "depends_on": [], "acceptance": [{"id": "A1", "text": "x", "check": {"kind": "reviewer"}}]}]}
+    assert validate_plan(plan, success_condition_ids=["SC1", "SC2"], constraint_ids=[]) == []
+    weird = {"tasks": [{"key": "x", "title": "t", "kind": "write", "description": "d", "addresses": {"a": 1},
+                        "depends_on": "other", "constraint_ids": [["C1"]],
+                        "acceptance": [{"id": "A1", "text": "x", "check": {"kind": "reviewer"}}]}]}
+    errs = validate_plan(weird, success_condition_ids=["SC1"], constraint_ids=["C1"])
+    assert any("depends_on must be a list" in e for e in errs) and any("constraint_ids" in e for e in errs)
+    assert any("SC1 is not addressed" in e for e in errs)

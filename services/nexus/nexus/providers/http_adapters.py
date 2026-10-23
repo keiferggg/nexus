@@ -121,6 +121,8 @@ class AnthropicAdapter(_HttpAdapter):
         if req.tools:
             body["tools"] = [{"name": t.name, "description": t.description, "input_schema": t.input_schema}
                              for t in req.tools]
+            if req.tool_choice == "none":
+                body["tool_choice"] = {"type": "none"}
         if req.temperature is not None:
             body["temperature"] = req.temperature
         return body
@@ -180,6 +182,8 @@ class OpenAIAdapter(_HttpAdapter):
         if req.tools:
             body["tools"] = [{"type": "function", "function": {"name": t.name, "description": t.description,
                                                                "parameters": t.input_schema}} for t in req.tools]
+            if req.tool_choice == "none":
+                body["tool_choice"] = "none"
         if req.response_json and not req.tools:
             body["response_format"] = {"type": "json_object"}
             # OpenAI rejects json_object mode unless the word "JSON" appears in the messages.
@@ -253,7 +257,7 @@ class OllamaAdapter(_HttpAdapter):
                 msgs.append({"role": "user", "content": m.content})
         body: dict[str, Any] = {"model": req.model, "messages": msgs, "stream": False,
                                 "options": {"num_predict": req.max_output_tokens}}
-        if req.tools:
+        if req.tools and req.tool_choice != "none":
             body["tools"] = [{"type": "function", "function": {"name": t.name, "description": t.description,
                                                                "parameters": t.input_schema}} for t in req.tools]
         elif req.response_json:

@@ -283,3 +283,17 @@ Total live spend across all missions: $1.56 (by owner-configured prices; not inv
   first if it is missing. NEXUS's own repo includes one (`nexus-sandbox:py312`).
 - Service suite: 99 passed, 16 opt-in skipped. Desktop app tests: 7 passed.
 - Not yet run live: chat and Autopilot against the real DeepSeek API.
+
+## 0.2.14 — first live self-improvement run (owner on 0.2.12; it ran as a one-off mission) failed in planning
+- Live (deepseek-v4-pro, NEXUS repo in `nexus-dev`, cap $2, spent $0.95 over 19 calls): attempts 1 and 3 were abandoned
+  with "tool loop exceeded 8 rounds" (the planner read file after file; input grew to 56k tokens); attempt 2 crashed in
+  `validate_plan` with `TypeError: unhashable type: 'list'` because the plan said `"addresses": ["SC1", "SC2"]`.
+- Fixes: a task may address several success conditions (validation, materialization, causal view, Mission control);
+  malformed plan structures come back as repair feedback, never as a crash; when an agent reaches its tool budget it
+  gets one final turn with `tool_choice: none` and answers from what it learned (it is no longer abandoned); budgets
+  per task kind (plan 8, code 30, research 16, write/act/discover/check 12, integrate 6); the planner is told to
+  explore briefly. The JSON-repair turn also keeps the tools declared, with tool_choice none, so a history that
+  contains tool calls stays valid.
+- Tests: test_explorer_that_never_stops_gets_a_final_no_tools_turn (simulator records `tool_choice: "none"`; 8
+  exploring rounds then the answer, and the mission completes) and
+  test_plan_addressing_several_conditions_is_valid_and_malformed_plans_never_crash. Service suite: 101 passed.
