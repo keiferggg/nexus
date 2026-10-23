@@ -122,7 +122,19 @@ function ProviderRow({ p, reload }: { p: any; reload: () => void }) {
               </div>
             )}
             <BalanceCheck providerId={p.id} />
-            <h4>Prices (required for paid execution)</h4>
+            {p.catalog_prices?.length > 0 && (
+              <>
+                <h4>Built-in prices (used automatically)</h4>
+                <div className="small muted">Official rates, kept up to date with NEXUS updates (list of {p.catalog_prices[0].catalog}).
+                  Each call is priced at the time it starts: peak {p.catalog_prices[0].peak_hours_utc.join(" and ")} UTC {p.catalog_prices[0].peak_days},
+                  otherwise off-peak. For these models anything entered below is ignored. Source: {p.catalog_prices[0].source}</div>
+                <table className="data" data-testid="catalog-prices"><thead><tr><th>Model</th><th>Period</th><th>Input $/Mtok</th><th>Cache-hit input</th><th>Output $/Mtok</th></tr></thead>
+                  <tbody>{p.catalog_prices.flatMap((x: any) => [
+                    <tr key={`${x.model}-p`}><td className="mono">{x.model}</td><td>peak</td><td>{x.peak.in}</td><td>{x.peak.cached_in}</td><td>{x.peak.out}</td></tr>,
+                    <tr key={`${x.model}-o`}><td /><td>off-peak</td><td>{x.offpeak.in}</td><td>{x.offpeak.cached_in}</td><td>{x.offpeak.out}</td></tr>])}</tbody></table>
+              </>
+            )}
+            <h4>{p.catalog_prices?.length > 0 ? "Your prices (for models not listed above)" : "Prices (required for paid execution)"}</h4>
             {p.prices.length === 0 ? <div className="small muted">No prices configured. Live missions using this provider are refused until a price is set for the model they use. Provider APIs do not report prices; enter the provider's published rate.</div> : (
               <table className="data"><thead><tr><th>Model</th><th>Input $/Mtok</th><th>Cache-hit input</th><th>Output $/Mtok</th><th>Source</th><th>v</th></tr></thead>
                 <tbody>{p.prices.map((x: any) => <tr key={`${x.model}${x.version}`}><td className="mono">{x.model}</td><td>{x.input_per_mtok_usd}</td><td>{x.cached_input_per_mtok_usd ?? "—"}</td><td>{x.output_per_mtok_usd}</td><td className="small">{x.source}</td><td>{x.version}</td></tr>)}</tbody></table>)}

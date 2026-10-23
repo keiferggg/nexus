@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+from datetime import datetime
 import json
 import re
 from dataclasses import dataclass
@@ -152,7 +153,16 @@ class ProviderRegistry:
                                                "cached_input_per_mtok_usd": cached_input_per_mtok})
         return v
 
-    def price(self, provider_id: str, model: str) -> dict[str, Any] | None:
+    def price(self, provider_id: str, model: str, at: datetime | None = None) -> dict[str, Any] | None:
+        """Rates for a call starting at `at` (now if omitted). The built-in catalog wins for the models it covers
+        (official rates, including time-of-day pricing); owner-entered prices cover everything else."""
+        from .price_catalog import catalog_price
+
+        row = self.get_row(provider_id)
+        if row["kind"] == "openai":
+            cp = catalog_price(row["base_url"], model, at)
+            if cp is not None:
+                return cp
         r = self.db.one("SELECT * FROM model_prices WHERE provider_id=? AND model=? ORDER BY version DESC LIMIT 1",
                         (provider_id, model))
         if r is not None:

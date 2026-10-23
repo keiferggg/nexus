@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -225,6 +226,12 @@ def create_app(ctx: AppContext, *, token: str, allowed_origins: list[str] | None
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         ensure_fake_provider(ctx)
+        try:
+            from ..providers.price_catalog import reprice_history
+
+            reprice_history(db)  # once per built-in catalog version
+        except Exception:
+            logging.getLogger("nexus.pricing").exception("repricing from the built-in catalog failed")
         state["startup_report"] = await sup.start()
         narrator = Narrator(ctx, chat)
         narrator.start()
@@ -317,6 +324,9 @@ def create_app(ctx: AppContext, *, token: str, allowed_origins: list[str] | None
         out = []
         for r in db.query("SELECT * FROM providers ORDER BY created_at"):
             v = ctx.registry.public_view(r)
+            from ..providers.price_catalog import catalog_rows
+
+            v["catalog_prices"] = catalog_rows(r["base_url"]) if r["kind"] == "openai" else []
             v["prices"] = [dict(p) for p in db.query("SELECT model, input_per_mtok_usd, output_per_mtok_usd,"
                                                      " cached_input_per_mtok_usd, source, version"
                                                      " FROM model_prices WHERE provider_id = ? ORDER BY model, version",

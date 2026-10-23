@@ -372,3 +372,17 @@ Total live spend across all missions: $1.56 (by owner-configured prices; not inv
   already committed) and retries only the steps that stopped on budget. Test:
   test_a_run_stopped_by_its_cap_continues_with_a_higher_cap_keeping_accepted_work (the run stops after its plan is
   accepted; a cap below the committed amount is refused; after continuing it completes with exactly one plan call).
+
+## 0.2.23 — built-in prices with DeepSeek's peak/off-peak schedule
+- Live finding: the first completed self-improvement run (json_query now refuses a call with no input, plus a test;
+  verified by me: 113 passed in the sandbox on the change merged with current main) was counted at $2.79. Over its
+  last stretch DeepSeek's balance fell by $0.13 while NEXUS counted $0.84: the owner had entered DeepSeek's peak rates,
+  the run was off-peak, and 76% of its input tokens were cache hits with no cache-hit rate set.
+- `nexus/providers/price_catalog.py`: official DeepSeek rates (deepseek-v4-pro, deepseek-flash and its retired
+  aliases), cache-hit / cache-miss input and output, peak 01:00–04:00 and 06:00–10:00 UTC Mon–Fri, otherwise half
+  price (Chinese public holidays are priced as peak: an overestimate). Source: api-docs.deepseek.com/quick_start/pricing
+  (read 2026-10-23). Each call is priced at its start time; for listed models the catalog wins over owner-entered
+  prices. Past calls are repriced once per catalog version (on a copy of the owner's database: 91 calls, $7.23 →
+  $5.76; the last run's final stretch → $0.1285, matching the $0.13 deducted).
+- Tests: tests/service/test_price_catalog.py (schedule boundaries and weekends, the live run's exact cost, catalog
+  over owner prices, repricing once). Service suite: 115 passed.
