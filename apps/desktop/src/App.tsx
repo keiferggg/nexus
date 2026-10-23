@@ -3,6 +3,7 @@ import { bridge, NexusEvent, onEvent, ServiceState, useApi } from "./api";
 import { Digest } from "./components/Autonomy";
 import { UpdateBanner } from "./components/Updates";
 import { Button, SimBadge, Status } from "./components/ui";
+import Chat from "./pages/Chat";
 import MissionPage from "./pages/Mission";
 import NewMission from "./pages/NewMission";
 import Connections from "./pages/Connections";
@@ -21,7 +22,8 @@ export type Route =
   | { view: "objectives" }
   | { view: "tools" }
   | { view: "settings"; section?: string }
-  | { view: "home" };
+  | { view: "home" }
+  | { view: "chat"; conversationId: string | null };
 
 function ServiceBanner({ state, streamOk }: { state: ServiceState | null; streamOk: boolean }) {
   const [tail, setTail] = useState<string | null>(null);
@@ -52,7 +54,8 @@ function ServiceBanner({ state, streamOk }: { state: ServiceState | null; stream
 export default function App() {
   const [svc, setSvc] = useState<ServiceState | null>(null);
   const [streamOk, setStreamOk] = useState(true);
-  const [route, setRoute] = useState<Route>({ view: "home" });
+  const [route, setRoute] = useState<Route>({ view: "chat", conversationId: null });
+  const [advanced, setAdvanced] = useState<boolean>(() => { try { return localStorage.getItem("nexus.advanced") === "1"; } catch { return false; } });
   const [projectId, setProjectId] = useState<string | null>(() => {
     try { return localStorage.getItem("nexus.project"); } catch { return null; }
   });
@@ -73,15 +76,14 @@ export default function App() {
   const projects = useApi<any[]>(ready ? "/api/projects" : null, (e) => e.type === "project.created", [ready]);
   const missionMatch = useCallback((e: NexusEvent) => e.type.startsWith("mission.") || e.type === "task.accepted", []);
   const missions = useApi<any[]>(ready && projectId ? `/api/projects/${projectId}/missions` : null, missionMatch, [ready]);
+  const convs = useApi<any[]>(ready ? "/api/chat/conversations" : null,
+    (e) => e.type === "chat.conversation_created" || e.type === "chat.conversation_archived" || e.type === "chat.idle", [ready]);
   const attention = useApi<any[]>(ready ? "/api/attention" : null,
     (e) => e.type.startsWith("attention.") || e.type === "task.transition" || e.type.startsWith("model_call.finished"), [ready]);
 
   useEffect(() => {
     if (!projects.data) return;
-    if (projects.data.length === 0) {
-      if (route.view === "home") setRoute({ view: "onboarding" });
-      return;
-    }
+    if (projects.data.length === 0) return;
     if (!projectId || !projects.data.some((p) => p.id === projectId)) selectProject(projects.data[0].id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projects.data]);
@@ -96,7 +98,7 @@ export default function App() {
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === ",") { e.preventDefault(); setRoute({ view: "settings" }); }
-      if (e.ctrlKey && e.key.toLowerCase() === "n" && !e.shiftKey) { e.preventDefault(); setRoute({ view: "new-mission" }); }
+      if (e.ctrlKey && e.key.toLowerCase() === "n" && !e.shiftKey) { e.preventDefault(); setRoute({ view: "chat", conversationId: null }); }
     };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
@@ -113,7 +115,24 @@ export default function App() {
       </div>
       <aside className="sidebar" aria-label="Navigation">
         <div className="brand"><span className="brand-mark" aria-hidden />NEXUS</div>
-        <div style={{ padding: "0 12px 8px" }}>
+        <nav className="nav" aria-label="Main">
+          <button className="nav-item new-chat" onClick={() => setRoute({ view: "chat", conversationId: null })}
+                  aria-current={route.view === "chat" && !route.conversationId ? "page" : undefined}>＋ New chat <span className="count kbd">Ctrl N</span></button>
+          <div className="nav-label">Chats</div>
+          {convs.data?.length === 0 && <div className="small faint" style={{ padding: "4px 8px" }}>No chats yet</div>}
+          {convs.data?.map((c) => (
+            <button key={c.id} className="nav-item" title={c.title}
+                    aria-current={route.view === "chat" && route.conversationId === c.id ? "page" : undefined}
+                    onClick={() => setRoute({ view: "chat", conversationId: c.id })}>
+              <span className="grow" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span>
+              {c.busy && <span className="dot-busy" aria-label="working" />}
+            </button>
+          ))}
+          <button className="nav-label nav-toggle" aria-expanded={advanced}
+                  onClick={() => { const v = !advanced; setAdvanced(v); try { localStorage.setItem("nexus.advanced", v ? "1" : "0"); } catch { /* ignore */ } }}>
+            {advanced ? "▾" : "▸"} Advanced</button>
+          {advanced && <>
+          <div style={{ padding: "0 12px 8px" }}>
           <label className="sr-only" htmlFor="project-select">Project</label>
           <select id="project-select" value={projectId ?? ""} onChange={(e) => selectProject(e.target.value)} disabled={!projects.data?.length}>
             {!projects.data?.length && <option value="">No projects</option>}
@@ -121,7 +140,7 @@ export default function App() {
           </select>
           {project?.is_demo ? <div style={{ marginTop: 6 }}><SimBadge /></div> : null}
         </div>
-        <nav className="nav" aria-label="Main">
+
           <button className="nav-item" aria-current={route.view === "home" ? "page" : undefined}
                   onClick={() => setRoute({ view: "home" })} disabled={!project}>Overview</button>
           <button className="nav-item" aria-current={route.view === "new-mission" ? "page" : undefined}
@@ -144,6 +163,9 @@ export default function App() {
           <button className="nav-item" aria-current={route.view === "settings" ? "page" : undefined} onClick={() => setRoute({ view: "settings" })}>
             Settings <span className="count kbd">Ctrl ,</span></button>
           <button className="nav-item" aria-current={route.view === "onboarding" ? "page" : undefined} onClick={() => setRoute({ view: "onboarding" })}>Setup</button>
+          </>}
+          {!advanced && <button className="nav-item" aria-current={route.view === "settings" ? "page" : undefined} onClick={() => setRoute({ view: "settings" })}>
+            Settings <span className="count kbd">Ctrl ,</span></button>}
         </nav>
         <div className="sidebar-foot" aria-live="polite">
           <div className="row">
@@ -163,6 +185,11 @@ export default function App() {
             <div>Nothing shown here would be trustworthy without it. Use “Restart service” above, or open the log.</div></div></div>
         ) : !ready ? (
           <div className="page"><div className="state" role="status">Starting the local NEXUS service…</div></div>
+        ) : route.view === "chat" ? (
+          <Chat conversationId={route.conversationId} key={route.conversationId ?? "new"}
+                onCreated={(id) => setRoute({ view: "chat", conversationId: id })}
+                openMission={(id) => setRoute({ view: "mission", missionId: id })}
+                openSettings={() => setRoute({ view: "settings" })} />
         ) : route.view === "onboarding" ? (
           <Onboarding onDone={(pid) => { if (pid) selectProject(pid); setRoute({ view: "new-mission" }); }} />
         ) : route.view === "new-mission" && project ? (

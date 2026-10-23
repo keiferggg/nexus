@@ -111,7 +111,11 @@ function createWindow() {
   const wc = win.webContents;
   subscribers.add(wc);
   wc.on("destroyed", () => subscribers.delete(wc));
-  wc.setWindowOpenHandler(() => ({ action: "deny" }));
+  wc.setWindowOpenHandler(({ url }) => {
+    // Links in answers and results open in the system browser; nothing else ever opens a window.
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
   wc.on("will-navigate", (e, url) => {
     if (!url.startsWith("file://") && !url.startsWith(process.env.VITE_DEV_SERVER_URL || "\0")) e.preventDefault();
   });

@@ -1,18 +1,19 @@
 import { useEffect, useState } from "react";
-import { bridge, post, put, useApi } from "../api";
+import { bridge, fmtUsd, post, put, useApi } from "../api";
 import { DefaultModelPicker, ProvidersPanel } from "../components/Providers";
 import { UpdatesPanel } from "../components/Updates";
 import { Badge, Button, Card, Field, KV, Load, Mono, Status, Tabs } from "../components/ui";
 
-type Sec = "providers" | "budgets" | "learning" | "initiative" | "backups" | "diagnostics";
+type Sec = "chat" | "providers" | "budgets" | "learning" | "initiative" | "backups" | "diagnostics";
 
 export default function Settings({ project }: { project: any }) {
-  const [sec, setSec] = useState<Sec>("providers");
+  const [sec, setSec] = useState<Sec>("chat");
   return (
     <div className="page" style={{ maxWidth: 1200 }}>
       <div className="page-head"><div className="titles"><h1>Settings</h1></div></div>
-      <Tabs<Sec> value={sec} onChange={setSec} tabs={[{ id: "providers", label: "Providers & models" }, { id: "budgets", label: "Budgets & concurrency" },
+      <Tabs<Sec> value={sec} onChange={setSec} tabs={[{ id: "chat", label: "Chat & limits" }, { id: "providers", label: "Providers & models" }, { id: "budgets", label: "Budgets & concurrency" },
         { id: "learning", label: "Learning" }, { id: "initiative", label: "Initiative" }, { id: "backups", label: "Backups" }, { id: "diagnostics", label: "Diagnostics" }]} />
+      {sec === "chat" && <ChatLimits />}
       {sec === "providers" && <div className="col gap-lg"><Card title="Default model" id="dm"><DefaultModelPicker /></Card><ProvidersPanel /></div>}
       {sec === "budgets" && <Budgets />}
       {sec === "learning" && <Learning />}
@@ -149,5 +150,40 @@ function Diagnostics() {
         </Card>
       </div>
     )}</Load>
+  );
+}
+
+function ChatLimits() {
+  const q = useApi<any>("/api/chat/status", (e) => e.type === "settings.changed");
+  const [f, setF] = useState<any>(null);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => { if (q.data && !f) setF({ ...q.data.limits }); }, [q.data]);
+  return (
+    <Load q={q}>{(d) => !f ? null : (
+      <Card title="What NEXUS may do on its own" id="cl">
+        <div className="col">
+          <div className="small">When you ask for real work in chat, NEXUS drafts a mission with a spending cap. Missions whose cap is within your
+            auto-start limit start immediately; bigger ones wait for a tap on Start. Agents can never raise a cap.</div>
+          <div className="grid thirds">
+            <Field label="Auto-start missions up to (USD)" htmlFor="cl1"><input id="cl1" type="number" min={0} step={0.25} value={f.auto_start_usd}
+              onChange={(e) => { setF({ ...f, auto_start_usd: e.target.value }); setSaved(false); }} /></Field>
+            <Field label="Largest cap chat may propose (USD)" htmlFor="cl2"><input id="cl2" type="number" min={0.25} step={0.5} value={f.max_cap_usd}
+              onChange={(e) => { setF({ ...f, max_cap_usd: e.target.value }); setSaved(false); }} /></Field>
+            <Field label="Daily budget for chat replies (USD)" htmlFor="cl3" hint={`spent today: ${fmtUsd(d.spent_today_usd, 3)}`}>
+              <input id="cl3" type="number" min={0} step={0.25} value={f.daily_chat_usd}
+                onChange={(e) => { setF({ ...f, daily_chat_usd: e.target.value }); setSaved(false); }} /></Field>
+          </div>
+          {err && <div className="callout bad small">{err}</div>}
+          <div className="row"><Button variant="primary" onClick={async () => {
+            setErr(null);
+            try {
+              await put("/api/settings/chat.limits", { value: { auto_start_usd: Number(f.auto_start_usd), max_cap_usd: Number(f.max_cap_usd),
+                daily_chat_usd: Number(f.daily_chat_usd) } });
+              setSaved(true); q.reload();
+            } catch (e) { setErr((e as Error).message); }
+          }}>Save limits</Button>{saved && <span className="small muted" role="status">Saved</span>}</div>
+        </div>
+      </Card>)}</Load>
   );
 }

@@ -22,8 +22,21 @@ async function launch(dataDir: string): Promise<{ app: ElectronApplication; page
 
 const missionStatus = (page: Page) => page.locator(".page-head .badge[data-status]").first();
 
-async function demoProject(page: Page) {
+/** Chat is the home screen; the classic pages (setup, missions, connections...) live under Advanced. */
+async function openAdvanced(page: Page) {
+  const t = page.getByRole("button", { name: /Advanced/ });
+  await expect(t).toBeVisible({ timeout: 60_000 });
+  if ((await t.getAttribute("aria-expanded")) === "false") await t.click();
+}
+
+async function openSetup(page: Page) {
+  await openAdvanced(page);
+  await page.getByRole("button", { name: "Setup", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Set up NEXUS" })).toBeVisible({ timeout: 60_000 });
+}
+
+async function demoProject(page: Page) {
+  await openSetup(page);
   await page.getByRole("button", { name: "2. Workspace" }).click();
   await page.getByRole("button", { name: "Create research demo" }).click();
   await expect(page.getByRole("heading", { name: "Add a provider" })).toBeVisible();
@@ -34,7 +47,7 @@ test("demo mission end-to-end, service crash truthfulness, restart persistence",
   const dataDir = path.join(root, "data");
   let { app, page } = await launch(dataDir);
 
-  await expect(page.getByRole("heading", { name: "Set up NEXUS" })).toBeVisible({ timeout: 60_000 });
+  await openSetup(page);
   await page.screenshot({ path: path.join(shots, "01-onboarding.png") });
   await page.getByRole("button", { name: "2. Workspace" }).click();
   await page.getByRole("button", { name: "Create research demo" }).click();
@@ -297,6 +310,25 @@ test("code sandbox profile: bad image refused, valid profile saved per project",
     await card.getByRole("button", { name: "Save sandbox" }).click();
     await expect(card.getByText("Saved", { exact: true })).toBeVisible();
     await expect(card.getByText("nexus-sandbox:py312", { exact: true })).toBeVisible();
+  } finally {
+    await app.close();
+  }
+});
+
+test("chat is the home screen and asks for one-time setup before sending anything", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nexus-ui-"));
+  const { app, page } = await launch(path.join(root, "data"));
+  try {
+    await expect(page.getByRole("heading", { name: "What should NEXUS do?" })).toBeVisible({ timeout: 60_000 });
+    await page.screenshot({ path: path.join(shots, "20-chat-home.png") });
+    await page.getByRole("textbox", { name: "Message NEXUS" }).fill("Research the best budget 3D printers and recommend one");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("setup-card")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("setup-card")).toContainText("Connect an AI provider");
+    await expect(page.locator(".cmsg.owner")).toContainText("budget 3D printers");
+    const chats = page.getByRole("navigation", { name: "Main" });
+    await expect(chats.getByRole("button", { name: /New chat/ })).toBeVisible();
+    await page.screenshot({ path: path.join(shots, "21-chat-setup.png") });
   } finally {
     await app.close();
   }

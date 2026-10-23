@@ -167,20 +167,42 @@ export function Doc({ text }: { text: string }) {
   const lines = text.split(/\r?\n/);
   const out: ReactNode[] = [];
   let list: string[] = [];
+  let ordered = false;
+  let code: string[] | null = null;
+  let table: string[] = [];
   const flush = () => {
     if (list.length) {
-      out.push(<ul key={`ul${out.length}`}>{list.map((l, i) => <li key={i}>{inline(l)}</li>)}</ul>);
+      const items = list.map((l, i) => <li key={i}>{inline(l)}</li>);
+      out.push(ordered ? <ol key={`ol${out.length}`}>{items}</ol> : <ul key={`ul${out.length}`}>{items}</ul>);
       list = [];
+    }
+    if (table.length) {
+      out.push(<pre key={`tb${out.length}`} className="pre">{table.join("\n")}</pre>);
+      table = [];
     }
   };
   lines.forEach((l, i) => {
+    if (/^\s*```/.test(l)) {
+      if (code === null) { flush(); code = []; } else { out.push(<pre key={i} className="pre"><code>{code.join("\n")}</code></pre>); code = null; }
+      return;
+    }
+    if (code !== null) { code.push(l); return; }
     const h = /^(#{1,3})\s+(.*)$/.exec(l);
     if (h) {
       flush();
       const Tag = (`h${h[1].length}`) as "h1" | "h2" | "h3";
       out.push(<Tag key={i}>{inline(h[2])}</Tag>);
+    } else if (/^\s*\|/.test(l)) {
+      if (list.length) flush();
+      table.push(l);
     } else if (/^\s*[-*]\s+/.test(l)) {
+      if (list.length && ordered) flush();
+      ordered = false;
       list.push(l.replace(/^\s*[-*]\s+/, ""));
+    } else if (/^\s*\d+[.)]\s+/.test(l)) {
+      if (list.length && !ordered) flush();
+      ordered = true;
+      list.push(l.replace(/^\s*\d+[.)]\s+/, ""));
     } else if (l.trim() === "") {
       flush();
     } else {
@@ -188,16 +210,19 @@ export function Doc({ text }: { text: string }) {
       out.push(<p key={i}>{inline(l)}</p>);
     }
   });
+  if (code !== null) out.push(<pre key="tail" className="pre"><code>{(code as string[]).join("\n")}</code></pre>);
   flush();
   return <div className="doc">{out}</div>;
 }
 
 function inline(s: string): ReactNode[] {
-  const parts = s.split(/(\[E:ev_[0-9a-f]+\]|\*\*[^*]+\*\*|`[^`]+`)/g);
+  const parts = s.split(/(\[E:ev_[0-9a-f]+\]|\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)\s]+\))/g);
   return parts.map((p, i) => {
     if (/^\[E:ev_/.test(p)) return <span key={i} className="cite" title={`evidence ${p.slice(3, -1)}`}>{p.slice(3, -1).slice(0, 9)}</span>;
     if (/^\*\*/.test(p)) return <strong key={i}>{p.slice(2, -2)}</strong>;
     if (/^`/.test(p)) return <code key={i}>{p.slice(1, -1)}</code>;
+    const link = /^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/.exec(p);
+    if (link) return <a key={i} href={link[2]} target="_blank" rel="noreferrer noopener" title={link[2]}>{link[1]}</a>;
     return <span key={i}>{p}</span>;
   });
 }

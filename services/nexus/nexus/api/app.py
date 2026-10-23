@@ -125,7 +125,8 @@ class SettingIn(BaseModel):
 
 
 SETTABLE = {"default_model_policy", "learning.auto_promote", "initiative.policy", "retention.days",
-            "data_exposure.acknowledged", "concurrency.defaults", "objectives.policy", "tools.policy"}
+            "data_exposure.acknowledged", "concurrency.defaults", "objectives.policy", "tools.policy",
+            "chat.limits", "chat.data_ack"}
 
 
 class ConnectorIn(BaseModel):
@@ -178,6 +179,11 @@ class SandboxIn(BaseModel):
     timeout_s: int | None = None
 
 
+class ChatIn(BaseModel):
+    text: str = ""
+    title: str = "New chat"
+
+
 class AutonomyIn(BaseModel):
     mode: str = "supervised"
     web_hosts: list[str] = []
@@ -204,13 +210,20 @@ def create_app(ctx: AppContext, *, token: str, allowed_origins: list[str] | None
     sup = Supervisor(ctx)
     state: dict[str, Any] = {"startup_report": None, "started": False}
     origins = set(allowed_origins or [])
+    from ..chat.narrator import Narrator
+    from ..chat.service import ChatService
+
+    chat = ChatService(ctx, sup)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         ensure_fake_provider(ctx)
         state["startup_report"] = await sup.start()
+        narrator = Narrator(ctx, chat)
+        narrator.start()
         state["started"] = True
         yield
+        await narrator.stop()
         await sup.stop()
 
     app = FastAPI(title="NEXUS local service", version=__version__, lifespan=lifespan, docs_url=None, redoc_url=None,
@@ -869,6 +882,49 @@ def create_app(ctx: AppContext, *, token: str, allowed_origins: list[str] | None
             "within_limits: per-mission and per-hour caps",
             "monitor: Sentinel (no tools, never reads untrusted content) judges whether the action serves your mission",
             "destructive actions always ask; repeated denials suspend the task for your review"]}
+
+    # ---- chat ---------------------------------------------------------------------------------
+    @app.get("/api/chat/conversations")
+    async def list_conversations():
+        return [{**dict(r), "busy": r["id"] in chat.busy} for r in db.query(
+            "SELECT * FROM conversations WHERE archived = 0 ORDER BY updated_at DESC LIMIT 200")]
+
+    @app.post("/api/chat/conversations")
+    async def new_conversation(body: ChatIn):
+        conv = chat.create_conversation(body.title.strip()[:60] or "New chat")
+        if body.text.strip():
+            chat.submit(conv["id"], body.text)
+        return {**conv, "busy": conv["id"] in chat.busy}
+
+    @app.get("/api/chat/conversations/{cid}")
+    async def get_conversation(cid: str):
+        c = db.one("SELECT * FROM conversations WHERE id = ?", (cid,))
+        if c is None:
+            raise KeyError(cid)
+        return {**dict(c), "busy": cid in chat.busy, "messages": chat.messages(cid)}
+
+    @app.post("/api/chat/conversations/{cid}/messages")
+    async def chat_send(cid: str, body: ChatIn):
+        chat.submit(cid, body.text)
+        return {"ok": True, "busy": True}
+
+    @app.post("/api/chat/conversations/{cid}/archive")
+    async def chat_archive(cid: str):
+        with db.tx() as cur:
+            cur.execute("UPDATE conversations SET archived = 1 WHERE id = ?", (cid,))
+            emit(cur, "chat.conversation_archived", "owner", {"conversation_id": cid})
+        return {"ok": True}
+
+    @app.post("/api/chat/missions/{mid}/start")
+    async def chat_start_mission(mid: str):
+        await chat.start_proposed(mid)
+        return views.mission_view(db, mid)
+
+    @app.get("/api/chat/status")
+    async def chat_status():
+        from ..chat.service import _limits
+
+        return {"setup": chat.setup_needed(), "limits": _limits(db), "spent_today_usd": chat._chat_spend_today()}
 
     @app.get("/api/projects/{pid}/sandbox")
     async def get_sandbox(pid: str):
