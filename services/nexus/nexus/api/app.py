@@ -181,6 +181,11 @@ class SandboxIn(BaseModel):
     test_command: list[str] | None = None
 
 
+class AutopilotLimitsIn(BaseModel):
+    run_cap_usd: float | None = None
+    daily_cap_usd: float | None = None
+
+
 class ChatIn(BaseModel):
     text: str = ""
     title: str = "New chat"
@@ -950,6 +955,10 @@ def create_app(ctx: AppContext, *, token: str, allowed_origins: list[str] | None
     async def list_autopilot():
         return {"standing": chat.autopilot.list(), "spent_today_usd": round(chat.autopilot._spent_today(), 4),
                 "daily_limit_usd": chat.autopilot.global_daily_limit()}
+
+    @app.put("/api/autopilot/{sid}/limits")
+    async def autopilot_limits(sid: str, body: AutopilotLimitsIn):
+        return chat.autopilot.set_limits(sid, run_cap_usd=body.run_cap_usd, daily_cap_usd=body.daily_cap_usd)
 
     @app.post("/api/autopilot/{sid}/{op}")
     async def autopilot_control(sid: str, op: str):

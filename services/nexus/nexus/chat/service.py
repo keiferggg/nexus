@@ -48,7 +48,8 @@ For each owner message decide ONE action:
   {"type":"daily","at":"HH:MM"} | {"type":"interval","every_minutes":N>=15} |
   {"type":"watch","url":"https://…","every_minutes":N>=15,"keyword":optional} | {"type":"continuous","cooldown_minutes":N>=10}
   and run_cap_usd (per run) and daily_cap_usd. A watch run receives the page change as a workspace file.
-- "autopilot_control": pause, resume, run_now or delete one of AUTOPILOTS.
+- "autopilot_control": pause, resume, run_now, delete, or set_limits (new per-run cap and/or daily limit) for one of
+  AUTOPILOTS.
 Mission drafting rules: success conditions must be concrete and checkable (what exists when done), 1-4 of them, in
 the owner's terms; include any destination URL or email the owner gave verbatim; never invent destinations. Choose a
 project from PROJECTS by id when the work concerns that project's folder or repository; use "personal" for general
@@ -62,7 +63,7 @@ Return ONLY a JSON object:
  "mission": {"title": str, "objective": str, "success_conditions": [str], "constraints": [str],
              "project": "<project id>|personal|{\\"path\\": str}", "estimate_usd": number, "cap_usd": number,
              "trigger": {...} (autopilot only), "run_cap_usd": number, "daily_cap_usd": number} | null,
- "autopilot": {"id": str, "op": "pause|resume|run_now|delete"} | null,
+ "autopilot": {"id": str, "op": "pause|resume|run_now|delete|set_limits", "run_cap_usd": number?, "daily_cap_usd": number?} | null,
  "mission_id": str | null,
  "revision": {"objective": str|null, "success_conditions": [str]|null, "reason": str} | null,
  "conversation_title": str (3-6 words)}"""
@@ -382,12 +383,21 @@ class ChatService:
 
     def _autopilot_control(self, cid: str, a: dict[str, Any], reply: str) -> dict[str, Any]:
         sid, op = a.get("id"), a.get("op")
-        if not sid or op not in ("pause", "resume", "run_now", "delete") or \
+        if not sid or op not in ("pause", "resume", "run_now", "delete", "set_limits") or \
                 not self.db.one("SELECT 1 FROM standing_missions WHERE id = ?", (sid,)):
             with self.db.tx() as cur:
                 self.post(cur, cid, "nexus", "text", reply or "I couldn't tell which autopilot you mean.")
             return {"action": "answer"}
-        self.autopilot.control(sid, op)
+        if op == "set_limits":
+            try:
+                self.autopilot.set_limits(sid, run_cap_usd=a.get("run_cap_usd"), daily_cap_usd=a.get("daily_cap_usd"),
+                                          actor="owner:chat")
+            except (ValueError, TypeError) as exc:
+                with self.db.tx() as cur:
+                    self.post(cur, cid, "nexus", "error", f"I couldn't change the limits: {exc}")
+                return {"error": str(exc)}
+        else:
+            self.autopilot.control(sid, op)
         with self.db.tx() as cur:
             self.post(cur, cid, "nexus", "text", reply or f"Done: {op.replace('_', ' ')}.")
         return {"action": "autopilot_control", "standing_id": sid, "op": op}

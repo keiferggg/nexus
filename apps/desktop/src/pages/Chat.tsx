@@ -224,14 +224,36 @@ function SetupCard({ m, retry, openSettings }: { m: any; retry: () => void; open
   );
 }
 
-export function AutopilotControls({ a, reload }: { a: any; reload: () => void }) {
+export function AutopilotControls({ a, reload, globalDaily }: { a: any; reload: () => void; globalDaily?: number }) {
   const [err, setErr] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [runCap, setRunCap] = useState(String(a.run_cap_usd));
+  const [daily, setDaily] = useState(String(a.daily_cap_usd));
   const op = async (o: string) => { setErr(null); try { await post(`/api/autopilot/${a.id}/${o}`); reload(); } catch (e) { setErr((e as Error).message); } };
+  const save = async () => {
+    setErr(null);
+    try {
+      await put(`/api/autopilot/${a.id}/limits`, { run_cap_usd: Number(runCap), daily_cap_usd: Number(daily) });
+      setEditing(false); reload();
+    } catch (e) { setErr((e as Error).message); }
+  };
   return (
-    <div className="row wrap">
-      {a.enabled ? <Button size="sm" onClick={() => op("pause")}>Pause</Button> : <Button size="sm" variant="primary" onClick={() => op("resume")}>Enable</Button>}
-      <Button size="sm" onClick={() => op("run_now")} disabled={!!a.active_run}>Run now</Button>
-      <Button size="sm" variant="ghost" onClick={() => { if (confirm(`Delete autopilot “${a.title}”? Past runs are kept.`)) void op("delete"); }}>Delete</Button>
+    <div className="col" style={{ gap: 6 }}>
+      <div className="row wrap">
+        {a.enabled ? <Button size="sm" onClick={() => op("pause")}>Pause</Button> : <Button size="sm" variant="primary" onClick={() => op("resume")}>Enable</Button>}
+        <Button size="sm" onClick={() => op("run_now")} disabled={!!a.active_run}>Run now</Button>
+        <Button size="sm" onClick={() => { setRunCap(String(a.run_cap_usd)); setDaily(String(a.daily_cap_usd)); setEditing(!editing); }}>Edit limits</Button>
+        <Button size="sm" variant="ghost" onClick={() => { if (confirm(`Delete autopilot “${a.title}”? Past runs are kept.`)) void op("delete"); }}>Delete</Button>
+      </div>
+      {editing && (
+        <div className="row wrap small" data-testid="autopilot-limits">
+          <label className="row">Per run $<input aria-label="per-run cap" type="number" min="0.1" step="0.5" value={runCap} onChange={(e) => setRunCap(e.target.value)} style={{ width: 80 }} /></label>
+          <label className="row">Per day $<input aria-label="daily limit" type="number" min="0.1" step="0.5" value={daily} onChange={(e) => setDaily(e.target.value)} style={{ width: 80 }} /></label>
+          <Button size="sm" variant="primary" onClick={save}>Save limits</Button>
+          {globalDaily !== undefined && Number(daily) > globalDaily &&
+            <span style={{ color: "var(--warn)" }}>All autopilots together are limited to {fmtUsd(globalDaily, 2)}/day (Settings → Chat & limits); raise that too.</span>}
+        </div>
+      )}
       {err && <span className="small" style={{ color: "var(--bad)" }}>{err}</span>}
     </div>
   );
@@ -245,12 +267,12 @@ function AutopilotCard({ m }: { m: any }) {
     <div className="autopilot-card" data-testid="autopilot-card">
       <div className="row"><strong className="grow">⟳ {m.content}</strong>
         {a ? (a.enabled ? <Badge tone="ok">on</Badge> : <Badge tone="warn">paused</Badge>) : q.data ? <Badge>deleted</Badge> : null}</div>
-      <div className="small">{d.schedule} · up to {fmtUsd(d.run_cap_usd, 2)} per run, {fmtUsd(d.daily_cap_usd, 2)} per day</div>
+      <div className="small">{d.schedule} · up to {fmtUsd(a?.run_cap_usd ?? d.run_cap_usd, 2)} per run, {fmtUsd(a?.daily_cap_usd ?? d.daily_cap_usd, 2)} per day</div>
       <div className="small muted">{d.objective}</div>
       {a && <div className="small faint">{a.active_run ? "running now" : a.next_run_at ? `next: ${new Date(a.next_run_at).toLocaleString()}` : ""}
         {a.status_note ? ` · ${a.status_note}` : ""} · spent today {fmtUsd(a.spent_today_usd, 3)}</div>}
       {!a?.enabled && d.why_disabled && a && <div className="small" style={{ color: "var(--warn)" }}>{d.why_disabled}</div>}
-      {a && <AutopilotControls a={a} reload={q.reload} />}
+      {a && <AutopilotControls a={a} reload={q.reload} globalDaily={q.data?.daily_limit_usd} />}
     </div>
   );
 }

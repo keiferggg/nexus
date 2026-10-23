@@ -188,3 +188,16 @@ async def test_each_run_posts_a_live_mission_card_into_its_chat(env):
     cards = [m for m in ap.chat.messages(cid) if m["kind"] == "mission"]
     assert len(cards) == 1 and cards[0]["mission_id"] == mid and cards[0]["data"]["cap_usd"] == 1.0
     assert cards[0]["data"]["standing_id"] == s["id"]
+
+
+async def test_owner_can_change_limits_and_runs_use_them(env):
+    c, sup, ap, proj, _ = env
+    s = standing(ap, proj, {"type": "interval", "every_minutes": 60}, run_cap=1.0, daily=2.0)
+    with pytest.raises(ValueError):
+        ap.set_limits(s["id"], run_cap_usd=3.0, daily_cap_usd=2.0)  # daily below per-run
+    v = ap.set_limits(s["id"], run_cap_usd=3.0, daily_cap_usd=6.0)
+    assert (v["run_cap_usd"], v["daily_cap_usd"]) == (3.0, 6.0)
+    ev = loads(c.db.one("SELECT payload_json FROM events WHERE type = 'autopilot.limits_changed'")["payload_json"], {})
+    assert ev["was"] == {"run_cap_usd": 1.0, "daily_cap_usd": 2.0} and ev["run_cap_usd"] == 3.0
+    [mid] = await ap.tick(datetime.now(timezone.utc))
+    assert c.db.one("SELECT spend_cap_usd FROM missions WHERE id = ?", (mid,))["spend_cap_usd"] == 3.0

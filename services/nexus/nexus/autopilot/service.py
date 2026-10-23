@@ -201,6 +201,27 @@ class Autopilot:
     def list(self) -> list[dict[str, Any]]:
         return [self.view(r["id"]) for r in self.db.query("SELECT id FROM standing_missions ORDER BY created_at DESC")]
 
+    def set_limits(self, sid: str, *, run_cap_usd: float | None, daily_cap_usd: float | None, actor: str = "owner") -> dict[str, Any]:
+        """Owner changes an autopilot's per-run cap and/or daily limit (agents have no way to call this)."""
+        r = self.db.one("SELECT * FROM standing_missions WHERE id = ?", (sid,))
+        if r is None:
+            raise KeyError(sid)
+        run_cap = round(float(run_cap_usd), 2) if run_cap_usd is not None else r["run_cap_usd"]
+        daily = round(float(daily_cap_usd), 2) if daily_cap_usd is not None else r["daily_cap_usd"]
+        if run_cap <= 0 or daily <= 0:
+            raise ValueError("limits must be positive")
+        if daily < run_cap:
+            raise ValueError(f"the daily limit (${daily:.2f}) must be at least the per-run cap (${run_cap:.2f})")
+        with self.db.tx() as cur:
+            cur.execute("UPDATE standing_missions SET run_cap_usd = ?, daily_cap_usd = ?, status_note = NULL, updated_at = ?"
+                        " WHERE id = ?", (run_cap, daily, now_iso(), sid))
+            emit(cur, "autopilot.limits_changed", actor, {"standing_id": sid, "run_cap_usd": run_cap, "daily_cap_usd": daily,
+                                                          "was": {"run_cap_usd": r["run_cap_usd"],
+                                                                  "daily_cap_usd": r["daily_cap_usd"]}},
+                 project_id=r["project_id"])
+        self.ctx.notifier._on_commit()
+        return self.view(sid)
+
     def control(self, sid: str, op: str) -> dict[str, Any]:
         r = self.db.one("SELECT * FROM standing_missions WHERE id = ?", (sid,))
         if r is None:

@@ -355,3 +355,11 @@ Total live spend across all missions: $1.56 (by owner-configured prices; not inv
   commands) and test_cached_input_is_billed_at_the_cached_rate_and_balance_is_compared (simulator reports 75% cache
   hits and a balance; per-call cost matches the formula exactly; a top-up is not counted). Service suite: 109 passed.
   UI tests: 7 passed (a label clash between the input and cache-hit fields was found by the test and fixed).
+
+## 0.2.20 — the owner can change an Autopilot's budget
+- Reported by the owner: there was no way to change an Autopilot's per-run cap or daily limit. Now: "Edit limits" on
+  the Autopilot card (validated: the daily limit must be at least the per-run cap; a warning when it exceeds the
+  global all-autopilots limit), `PUT /api/autopilot/{id}/limits`, and chat ("raise the morning brief to $3 per run")
+  via `autopilot_control` op `set_limits`. Each change is recorded with the previous values. The next run uses the new
+  cap. Tests: test_owner_can_change_limits_and_runs_use_them, test_chat_can_change_an_autopilots_limits. Service suite:
+  111 passed.

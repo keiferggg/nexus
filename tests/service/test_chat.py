@@ -258,3 +258,25 @@ async def test_repo_sandbox_is_set_up_automatically_from_nexus_sandbox_json(env,
         cur.execute("UPDATE projects SET settings_json = '{}' WHERE id = ?", (rp2,))
     await chat.ensure_repo_sandbox(rp2, cid)
     assert len(sb.builds) == 1 and any("escapes the repository" in m["content"] for m in chat.messages(cid))
+
+
+async def test_chat_can_change_an_autopilots_limits(env, tmp_path):
+    c, sup, chat, pid, sim = env
+    configure(c, pid)
+    larkspur(c, tmp_path)
+    cid = chat.create_conversation()["id"]
+    r = await chat.send(cid, "autopilot: brief me every morning")
+    sid = r["standing_id"]
+    original = sim.brain
+
+    def raise_caps(req, packet):
+        if req.metadata.get("role") == "NEXUS" and "raise" in owner_message(req):
+            return {"reply": "Raised.", "action": "autopilot_control",
+                    "autopilot": {"id": sid, "op": "set_limits", "run_cap_usd": 3, "daily_cap_usd": 6}}
+        return original(req, packet)
+
+    sim.brain = raise_caps
+    r2 = await chat.send(cid, "raise the morning brief to $3 per run and $6 a day")
+    assert r2["op"] == "set_limits"
+    row = c.db.one("SELECT run_cap_usd, daily_cap_usd FROM standing_missions WHERE id = ?", (sid,))
+    assert (row["run_cap_usd"], row["daily_cap_usd"]) == (3.0, 6.0)
