@@ -363,3 +363,12 @@ Total live spend across all missions: $1.56 (by owner-configured prices; not inv
   via `autopilot_control` op `set_limits`. Each change is recorded with the previous values. The next run uses the new
   cap. Tests: test_owner_can_change_limits_and_runs_use_them, test_chat_can_change_an_autopilots_limits. Service suite:
   111 passed.
+
+## 0.2.21–0.2.22 — continue a run that hit its cap instead of starting over
+- 0.2.21: the Autopilot card says when its last run is blocked (no new run starts until it is finished or canceled) and
+  offers to cancel it. Seen live: "Run now" was disabled with no explanation.
+- 0.2.22: owner feedback: canceling throws away the accepted plan and steps. New "Raise cap & continue" (on the
+  Autopilot's stuck-run notice and on budget "Stuck" messages in chat): raises the mission cap (must exceed what is
+  already committed) and retries only the steps that stopped on budget. Test:
+  test_a_run_stopped_by_its_cap_continues_with_a_higher_cap_keeping_accepted_work (the run stops after its plan is
+  accepted; a cap below the committed amount is refused; after continuing it completes with exactly one plan call).

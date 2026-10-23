@@ -573,6 +573,25 @@ class Supervisor:
             emit(cur, "attention.task_suspended", "nexus:guard", {"reason": reason, "task_key": t["key"], "attempt_id": attempt_id},
                  project_id=t["project_id"], mission_id=t["mission_id"], task_id=t["id"])
 
+    def continue_with_budget(self, mission_id: str, cap_usd: float, *, actor: str = "owner") -> int:
+        """Owner raises a mission's cap and resumes the steps that stopped on it. Accepted work is kept; only the
+        stopped steps start a new attempt. Returns how many steps were resumed."""
+        from ..domain.budget import summary as budget_summary
+
+        with self.ctx.db.tx() as cur:
+            m = get_mission(cur, mission_id)
+            committed = budget_summary(cur, mission_id)["committed_usd"]
+            if cap_usd <= committed:
+                raise ValueError(f"the new cap must be above what is already committed (${committed:.4f})")
+            cur.execute("UPDATE missions SET spend_cap_usd = ?, version = version + 1 WHERE id = ?", (cap_usd, mission_id))
+            emit(cur, "budget.cap_changed", actor, {"from": m["spend_cap_usd"], "to": cap_usd, "continue": True},
+                 project_id=m["project_id"], mission_id=mission_id)
+        stopped = [t["id"] for t in self.ctx.db.query("SELECT id FROM tasks WHERE mission_id = ? AND status IN"
+                                                      " ('blocked','failed') AND status_reason LIKE 'budget%'", (mission_id,))]
+        for tid in stopped:
+            self.retry_task(tid, actor=actor)
+        return len(stopped)
+
     def retry_task(self, task_id: str, *, actor: str = "owner") -> None:
         """Owner retry of a blocked/failed task: a fresh attempt budget in the same epoch."""
         with self.ctx.db.tx() as cur:

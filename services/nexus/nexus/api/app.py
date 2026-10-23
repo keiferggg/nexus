@@ -557,6 +557,15 @@ def create_app(ctx: AppContext, *, token: str, allowed_origins: list[str] | None
                  mission_id=mid)
         return budget_summary_for(mid)
 
+    @app.post("/api/missions/{mid}/continue")
+    async def continue_with_more_budget(mid: str, body: SettingIn):
+        """Raise a mission's cap and resume the steps that stopped on it. Accepted work (plan, finished steps) is kept;
+        only the stopped steps start a new attempt. Seen live: the only option was to cancel, which threw away an
+        accepted plan and improvement choice."""
+        n = sup.continue_with_budget(mid, float(body.value))
+        ctx.notifier._on_commit()
+        return {"resumed_tasks": n, "budget": budget_summary_for(mid)}
+
     def budget_summary_for(mid: str):
         with db.tx() as cur:
             return budget_summary(cur, mid)

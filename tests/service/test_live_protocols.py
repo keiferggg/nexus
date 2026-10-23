@@ -291,3 +291,23 @@ async def test_cached_input_is_billed_at_the_cached_rate_and_balance_is_compared
     assert cmp["snapshots"] == 3 and cmp["topups"] == 5.0 and cmp["calls"] == len(calls)
     assert abs(cmp["deducted"] - (round(spent, 2) + 0.01)) < 1e-9
     assert abs(cmp["nexus_computed_usd"] - round(spent, 4)) < 1e-4
+
+
+async def test_a_run_stopped_by_its_cap_continues_with_a_higher_cap_keeping_accepted_work(live):
+    """Seen live: a run hit its cap after its plan and first step were accepted; the only option was to cancel and
+    start over. Raising the cap resumes only the stopped steps."""
+    c, sup = live
+    pid, model, sim = configure(c, "deepseek")
+    proj = create_demo_project(c, "research")
+    mid = new_mission(c, proj, mode="live", cap=0.006)  # far too small to finish
+    assert await sup.wait_idle(mid, timeout=90) == "blocked"
+    before = tasks(c, mid)
+    stopped = [k for k, t in before.items() if (t["status_reason"] or "").startswith("budget")]
+    accepted = {k for k, t in before.items() if t["status"] == "accepted"}
+    assert stopped and "plan" in accepted
+    with pytest.raises(ValueError):
+        sup.continue_with_budget(mid, 0.0001)  # below what is already committed
+    assert sup.continue_with_budget(mid, 1.0) == len(stopped)
+    assert await sup.wait_idle(mid, timeout=90) == "completed"
+    plan_calls = c.db.one("SELECT COUNT(*) AS n FROM model_calls WHERE mission_id = ? AND purpose = 'plan'", (mid,))["n"]
+    assert plan_calls == 1, "the accepted plan was not redone"

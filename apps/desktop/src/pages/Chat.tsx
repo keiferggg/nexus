@@ -175,8 +175,10 @@ function AttentionCard({ m, openMission }: { m: any; openMission: (id: string) =
             <Button size="sm" variant="danger" onClick={() => act(() => post(`/api/actions/${a.action_request_id}/deny`, { note }))}>Deny</Button></>}
           {a.submission_id && (a.kind === "owner_approval" || a.kind === "task_blocked") &&
             <Button size="sm" variant="primary" onClick={() => act(() => post(`/api/submissions/${a.submission_id}/owner-review`, { criterion: a.criterion, verdict: "pass", note: note || "approved in chat" }))}>Approve it myself</Button>}
-          {(a.kind === "task_blocked" || a.kind === "task_failed") && a.task_id &&
+          {(a.kind === "task_blocked" || a.kind === "task_failed") && a.task_id && !String(a.detail ?? "").startsWith("budget") &&
             <Button size="sm" onClick={() => act(() => post(`/api/tasks/${a.task_id}/retry`))}>Retry step</Button>}
+          {String(a.detail ?? "").startsWith("budget") && (m.mission_id || a.mission_id) &&
+            <ContinueWithBudget missionId={m.mission_id || a.mission_id} onDone={live.reload} />}
           <input aria-label="note" placeholder="note (optional)" value={note} onChange={(e) => setNote(e.target.value)} style={{ width: 200 }} />
           {m.mission_id && <Button size="sm" variant="ghost" onClick={() => openMission(m.mission_id)}>Details</Button>}
         </div>
@@ -276,8 +278,10 @@ function AutopilotCard({ m }: { m: any }) {
       {stuck && (
         <div className="callout warn small" data-testid="autopilot-stuck">
           The last run ({new Date(stuck.created_at).toLocaleString()}) is {stuck.status} and needs you; no new run starts until it is finished or canceled.
+          If it ran out of budget, raise its cap to let it finish: its accepted plan and steps are kept.
+          <ContinueWithBudget missionId={stuck.mission_id} onDone={q.reload} />
           <div className="row" style={{ marginTop: 6 }}>
-            <Button size="sm" variant="primary" onClick={async () => { setErr(null); try { await post(`/api/missions/${stuck.mission_id}/cancel`); q.reload(); } catch (e) { setErr((e as Error).message); } }}>Cancel stuck run</Button>
+            <Button size="sm" onClick={async () => { setErr(null); try { await post(`/api/missions/${stuck.mission_id}/cancel`); q.reload(); } catch (e) { setErr((e as Error).message); } }}>Cancel stuck run</Button>
             {err && <span style={{ color: "var(--bad)" }}>{err}</span>}
           </div>
         </div>
@@ -286,6 +290,29 @@ function AutopilotCard({ m }: { m: any }) {
         {a.status_note ? ` · ${a.status_note}` : ""} · spent today {fmtUsd(a.spent_today_usd, 3)}</div>}
       {!a?.enabled && d.why_disabled && a && <div className="small" style={{ color: "var(--warn)" }}>{d.why_disabled}</div>}
       {a && <AutopilotControls a={a} reload={q.reload} globalDaily={q.data?.daily_limit_usd} />}
+    </div>
+  );
+}
+
+/** Raise a mission's cap and resume the steps that stopped on it; accepted work is kept. */
+export function ContinueWithBudget({ missionId, onDone }: { missionId: string; onDone: () => void }) {
+  const q = useApi<any>(`/api/missions/${missionId}`, (e) => e.mission_id === missionId && e.type.startsWith("budget."));
+  const [cap, setCap] = useState<string>("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const cur = q.data?.mission?.spend_cap_usd;
+  const committed = q.data?.budget?.committed_usd;
+  useEffect(() => { if (cur != null && cap === "") setCap(String(Math.round((cur + 1.5) * 100) / 100)); }, [cur]);
+  if (cur == null) return null;
+  return (
+    <div className="row wrap small" data-testid="continue-budget">
+      <span>Spent {fmtUsd(committed, 2)} of {fmtUsd(cur, 2)}. New cap $</span>
+      <input aria-label="new cap" type="number" min={0} step={0.5} value={cap} onChange={(e) => setCap(e.target.value)} style={{ width: 80 }} />
+      <Button size="sm" variant="primary" disabled={busy} onClick={async () => {
+        setBusy(true); setErr(null);
+        try { await post(`/api/missions/${missionId}/continue`, { value: Number(cap) }); onDone(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+      }}>Raise cap & continue</Button>
+      {err && <span style={{ color: "var(--bad)" }}>{err}</span>}
     </div>
   );
 }
