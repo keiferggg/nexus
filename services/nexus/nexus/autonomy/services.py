@@ -468,6 +468,9 @@ class Collaboration:
             data = parse_json_output(out.result.text)
         except Exception:
             data = {"answer": out.result.text[:2000], "evidence_ids": [], "confidence_basis": "unstructured reply"}
+        if not str(data.get("answer") or "").strip():  # seen live: an empty reply looked like an answer
+            data = {"answer": "(no answer: the colleague returned an empty reply. Colleagues you consult cannot read files"
+                              " or use tools; read what you need yourself.)", "evidence_ids": [], "confidence_basis": "none"}
         with db.tx() as cur:
             q_id, _ = rooms.post(cur, operation_id=f"{op}:consult:q", project_id=tctx.project_id, mission_id=tctx.mission_id,
                                  thread_id=rooms.thread_for_task(tctx.task_id), sender=f"agent:{tctx.agent_id}",
@@ -738,7 +741,9 @@ def register_tools(broker) -> None:
                                                               "input_schema": {"type": "object"}, "spec": {"type": "object"},
                                                               "tests": {"type": "array", "items": {"type": "object"}}},
                              "required": ["name", "description", "kind", "input_schema", "spec", "tests"]}, create_tool))
-    broker.register(ToolDef("consult", READ_ONLY, "Ask another agent (by role) a question; returns their answer.",
+    broker.register(ToolDef("consult", READ_ONLY, "Ask another agent (by role) a question; returns their answer. They see only"
+                            " your question, the mission's evidence and their own memory: they cannot read files or use"
+                            " tools, so include the relevant excerpt in your question.",
                             _obj({"role": S, "question": S}, ["role", "question"]), consult))
     broker.register(ToolDef("delegate_task", LOCAL_WRITE,
                             "Create a subtask for another specialist; its verified result feeds the mission integration.",
