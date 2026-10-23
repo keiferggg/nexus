@@ -311,3 +311,19 @@ Total live spend across all missions: $1.56 (by owner-configured prices; not inv
   reports it present; its changed files are only its own; the sandbox ran on worktrees containing both files, the last
   being the integration. test_workspace_conflict_detected_and_integrated now also approves the combined-tests
   criterion (no sandbox in that test). Service suite: 102 passed, 16 opt-in skipped.
+
+## 0.2.17 — first live Autopilot run: blocked by its cap before editing anything
+- Live (continuous self-improvement on `nexus-dev`, $2/run): the planner produced a valid plan on its second round
+  (round 1 omitted a success condition; the plan check caught it). The engineer then read files through `run_tests`
+  (`cat`, `sed`, `grep`); every model call re-sent all earlier tool output, reaching 67k input tokens (~$0.09) per
+  call. The run spent $1.89 and was stopped by the cap ("reservation $0.1314 would exceed cap $2.0000") with no edits
+  made. The cap and the Autopilot's "last run blocked: waiting on you" rule both held. A consulted colleague also
+  returned an empty answer (consultants have no tools); that is now stated explicitly (0.2.16).
+- The owner saw only "Autopilot: started" in the chat and reported that nothing was happening.
+- Fixes: older tool results are cut to a 400-character preview once all tool output in a call exceeds 40,000
+  characters (the 3 most recent stay whole; each result is capped at 12,000), with a note that the tool can be called
+  again; engineers are told to read with repo_read and to use run_tests only for tests; each Autopilot run posts a live
+  mission card (progress, current activity, spend) into its chat, and the Autopilot card's spend refreshes on every
+  model call.
+- Tests: test_old_tool_results_are_elided_but_recent_ones_stay_whole and
+  test_each_run_posts_a_live_mission_card_into_its_chat. Service suite: 104 passed, 16 opt-in skipped.

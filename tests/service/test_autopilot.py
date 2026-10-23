@@ -174,3 +174,17 @@ async def test_paused_autopilot_does_not_run_and_run_now_does(env):
     assert len(await ap.tick(datetime.now(timezone.utc) + timedelta(seconds=1))) == 1
     ap.control(s["id"], "delete")
     assert c.db.one("SELECT COUNT(*) AS n FROM standing_missions")["n"] == 0
+
+
+async def test_each_run_posts_a_live_mission_card_into_its_chat(env):
+    """Seen live: the owner saw only an 'Autopilot: started' line and thought nothing was happening while the run
+    was spending. Each run now posts a mission card (progress, current activity, spend) into its conversation."""
+    c, sup, ap, proj, _ = env
+    cid = ap.chat.create_conversation()["id"]
+    s = ap.create(project_id=proj, title="Larkspur brief", objective=OBJ, success_conditions=SC, constraints=[],
+                  trigger={"type": "interval", "every_minutes": 60}, run_cap_usd=1.0, daily_cap_usd=5.0,
+                  conversation_id=cid, created_by="owner")
+    [mid] = await ap.tick(datetime.now(timezone.utc))
+    cards = [m for m in ap.chat.messages(cid) if m["kind"] == "mission"]
+    assert len(cards) == 1 and cards[0]["mission_id"] == mid and cards[0]["data"]["cap_usd"] == 1.0
+    assert cards[0]["data"]["standing_id"] == s["id"]

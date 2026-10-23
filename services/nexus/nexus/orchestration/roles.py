@@ -42,7 +42,9 @@ DOC_OUTPUT = """When finished, return ONLY a JSON object:
  "acknowledged_message_ids": [str]}
 Use tools to read sources first. Only cite evidence ids returned by tools."""
 
-CODE_OUTPUT = """Use repo_list/repo_read/repo_write to make the change in your isolated worktree. When finished, return ONLY:
+CODE_OUTPUT = """Use repo_list/repo_read/repo_write to make the change in your isolated worktree; use run_tests only to run
+tests, not to read files. Every call re-sends what you have read so far, so read only what the change needs (search
+before reading whole files) and start editing early. When finished, return ONLY:
 {"summary": str, "files_changed": [paths], "test_command": [argv] | null, "notes": str}"""
 
 INTEGRATE_DOC_OUTPUT = """Combine the accepted input artifacts into one deliverable. Include every input (reference each by

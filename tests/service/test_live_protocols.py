@@ -233,3 +233,25 @@ def test_plan_addressing_several_conditions_is_valid_and_malformed_plans_never_c
     errs = validate_plan(weird, success_condition_ids=["SC1"], constraint_ids=["C1"])
     assert any("depends_on must be a list" in e for e in errs) and any("constraint_ids" in e for e in errs)
     assert any("SC1 is not addressed" in e for e in errs)
+
+
+def test_old_tool_results_are_elided_but_recent_ones_stay_whole():
+    """Seen live: an engineer reading a large repository reached 67k input tokens per call and spent $1.78 of a $2 cap
+    before editing anything, because every tool result was re-sent in full on every call."""
+    from nexus.orchestration.worker import TOOL_CONTEXT_CHARS, compact_tool_results
+    from nexus.providers.base import ChatMessage, ToolCall
+
+    msgs = [ChatMessage("user", "task")]
+    for i in range(12):
+        msgs.append(ChatMessage("assistant", "", tool_calls=[ToolCall(f"c{i}", "repo_read", {"path": f"f{i}.py"})]))
+        msgs.append(ChatMessage("tool", f"file {i} " + "x" * 15000, tool_call_id=f"c{i}", tool_name="repo_read"))
+        compact_tool_results(msgs)
+    tools = [m for m in msgs if m.role == "tool"]
+    from nexus.orchestration.worker import KEEP_RECENT_TOOL_RESULTS as K
+
+    assert all(len(m.content) > 15000 for m in tools[-K:]), "the most recent results stay whole"
+    assert all(len(m.content) < 700 for m in tools[:-K]), "older results are elided once over budget"
+    before = 12 * 15007
+    assert sum(len(m.content) for m in tools) < before / 3
+    assert tools[0].content.startswith("file 0 ") and "call the tool again" in tools[0].content
+    assert [m.tool_call_id for m in tools] == [f"c{i}" for i in range(12)], "pairing with tool calls is preserved"

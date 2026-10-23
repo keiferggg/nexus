@@ -290,8 +290,13 @@ class Autopilot:
             emit(cur, "autopilot.run_started", "nexus:autopilot", {"standing_id": sid, "reason": reason[:300]},
                  project_id=r["project_id"], mission_id=mid)
             if r["conversation_id"] and self.chat:
-                self.chat.post(cur, r["conversation_id"], "nexus", "progress", f"Autopilot: started “{r['title']}” ({reason})",
-                               {"standing_id": sid}, mission_id=mid, dedup=f"autorun:{mid}")
+                # A live mission card (progress, current activity, spend), like any mission started from chat.
+                self.chat.post(cur, r["conversation_id"], "nexus", "mission", f"⟳ {r['title']} — run {now.astimezone():%b %d %H:%M}",
+                               {"mission_id": mid, "objective": r["objective"],
+                                "success_conditions": loads(r["success_conditions_json"], []),
+                                "estimate_usd": r["run_cap_usd"] / 2, "cap_usd": r["run_cap_usd"], "auto_started": True,
+                                "standing_id": sid, "reason": reason[:300]},
+                               mission_id=mid, dedup=f"autorun:{mid}")
         self.ctx.notifier._on_commit()
         return mid
 

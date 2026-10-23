@@ -38,6 +38,31 @@ DEFAULT_OUTPUT_TOKENS = 8192
 # Tool rounds per task kind before the final no-tools answer. Code work in a real repository needs room to explore,
 # edit and run tests; planning should stay brief (details belong to the tasks it creates).
 TOOL_ROUNDS = {"plan": 8, "code": 30, "research": 16, "write": 12, "act": 12, "discover": 12, "check": 12, "integrate": 6}
+TOOL_RESULT_CHARS = 12000      # one tool result, as sent to the model
+TOOL_CONTEXT_CHARS = 40000     # all tool results together; older ones are elided beyond this
+KEEP_RECENT_TOOL_RESULTS = 3
+
+
+def compact_tool_results(messages: list[ChatMessage]) -> int:
+    """Every model call re-sends the whole conversation, so tool results accumulate: seen live, an engineer reading a
+    large repository reached 67k input tokens (~$0.09) per call and spent $1.78 before writing anything. Older tool
+    results beyond the budget are cut to a short preview with a note that the tool can be called again; the most
+    recent ones stay whole. Returns the number of characters removed."""
+    tool_ix = [i for i, m in enumerate(messages) if m.role == "tool"]
+    total = sum(len(messages[i].content) for i in tool_ix)
+    removed = 0
+    for i in tool_ix[:-KEEP_RECENT_TOOL_RESULTS]:
+        if total <= TOOL_CONTEXT_CHARS:
+            break
+        c = messages[i].content
+        if len(c) <= 600 or c.endswith("[elided]"):
+            continue
+        stub = c[:400] + f"\n… [{len(c) - 400} more characters not repeated to keep context small; call the tool again" \
+                         " if you need them] [elided]"
+        messages[i] = ChatMessage("tool", stub, tool_call_id=messages[i].tool_call_id, tool_name=messages[i].tool_name)
+        total -= len(c) - len(stub)
+        removed += len(c) - len(stub)
+    return removed
 LEGACY_OUTPUT_DEFAULT = 2048
 
 
@@ -217,7 +242,9 @@ class TaskWorker:
                 for j, tc in enumerate(res.tool_calls):
                     r = await self.ctx.broker.invoke(tool_ctx, tc.name, tc.arguments, operation_id=f"{base}:{i}:tool:{j}") \
                         if tool_ctx else {"ok": False, "error": "no tools available"}
-                    messages.append(ChatMessage("tool", json.dumps(r)[:24000], tool_call_id=tc.id, tool_name=tc.name))
+                    messages.append(ChatMessage("tool", json.dumps(r)[:TOOL_RESULT_CHARS], tool_call_id=tc.id,
+                                                tool_name=tc.name))
+                compact_tool_results(messages)
                 continue
             try:
                 return parse_json_output(res.text)

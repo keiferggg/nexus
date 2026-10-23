@@ -239,7 +239,7 @@ export function AutopilotControls({ a, reload }: { a: any; reload: () => void })
 
 function AutopilotCard({ m }: { m: any }) {
   const d = m.data || {};
-  const q = useApi<any>("/api/autopilot", (e) => e.type.startsWith("autopilot.") || e.type.startsWith("mission."));
+  const q = useApi<any>("/api/autopilot", (e) => e.type.startsWith("autopilot.") || e.type.startsWith("mission.") || e.type === "model_call.finished");
   const a = (q.data?.standing ?? []).find((x: any) => x.id === d.standing_id);
   return (
     <div className="autopilot-card" data-testid="autopilot-card">
