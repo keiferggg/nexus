@@ -297,3 +297,17 @@ Total live spend across all missions: $1.56 (by owner-configured prices; not inv
 - Tests: test_explorer_that_never_stops_gets_a_final_no_tools_turn (simulator records `tool_choice: "none"`; 8
   exploring rounds then the answer, and the mission completes) and
   test_plan_addressing_several_conditions_is_valid_and_malformed_plans_never_crash. Service suite: 101 passed.
+
+## 0.2.15 — code built on code is verified on the combined result
+- Seen live (first Autopilot self-improvement run): the plan split "implement one improvement" and "run the full
+  service suite in the sandbox" into two code tasks. Every code task started from the mission's base commit, so the
+  second task would have tested the unchanged code and passed; and integrating code branches ran no tests.
+- Fixes: a code task that depends on code tasks starts from their accepted work merged into its worktree (its own diff
+  and changed files are measured from that point; a non-merging upstream fails the attempt explicitly); integrating
+  code requires the project's tests to pass in the sandbox on the combined worktree (owner approval when no sandbox is
+  available); a repository can name its test command in `.nexus/sandbox.json` (`test_command`), which the sandbox check
+  uses, and saving sandbox settings in the app keeps it.
+- Test: tests/service/test_code_chain.py: the dependent task reads first.txt from its upstream (in its worktree) and
+  reports it present; its changed files are only its own; the sandbox ran on worktrees containing both files, the last
+  being the integration. test_workspace_conflict_detected_and_integrated now also approves the combined-tests
+  criterion (no sandbox in that test). Service suite: 102 passed, 16 opt-in skipped.

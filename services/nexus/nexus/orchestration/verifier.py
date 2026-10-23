@@ -89,7 +89,8 @@ class Verifier:
                     "limitation": "code was not executed; behavior unverified"}
         if worktree is None:
             return {"verdict": "inconclusive", "summary": "no worktree"}
-        cmd = (check.get("args") or {}).get("command") or meta.get("test_command") or ["python", "-m", "pytest", "-q"]
+        cmd = ((check.get("args") or {}).get("command") or meta.get("test_command") or profile.get("test_command")
+               or ["python", "-m", "pytest", "-q"])
         res = await self.ctx.sandbox.run(worktree, cmd, profile=profile)
         return {"verdict": "pass" if res["passed"] else "fail",
                 "summary": f"exit {res['exit_code']}{' (timeout)' if res['timed_out'] else ''}", "details": res}

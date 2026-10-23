@@ -177,6 +177,7 @@ class SandboxIn(BaseModel):
     cpus: float | None = None
     tmpfs_mb: int | None = None
     timeout_s: int | None = None
+    test_command: list[str] | None = None
 
 
 class ChatIn(BaseModel):
@@ -953,7 +954,12 @@ def create_app(ctx: AppContext, *, token: str, allowed_origins: list[str] | None
     async def put_sandbox(pid: str, body: SandboxIn):
         from ..tools.sandbox import clean_profile
 
-        prof = clean_profile(body.model_dump())  # raises ValueError on a bad image name
+        from ..tools.sandbox import project_profile
+
+        raw = body.model_dump()
+        if raw.get("test_command") is None:  # keep a test command set by the repository's .nexus/sandbox.json
+            raw["test_command"] = project_profile(db, pid).get("test_command")
+        prof = clean_profile(raw)  # raises ValueError on a bad image name or test command
         with db.tx() as cur:
             p = cur.execute("SELECT settings_json FROM projects WHERE id = ?", (pid,)).fetchone()
             if p is None:

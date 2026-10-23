@@ -97,6 +97,16 @@ async def test_workspace_conflict_detected_and_integrated(ctx, sup):
         assert r["verdict"] == "accepted"
     st = await sup.wait_idle(mid, timeout=60)
     integ = tasks(ctx, mid)["integrate"]
+    # The combined code must also pass the tests; without a sandbox that is an explicit owner approval as well.
+    if integ["status"] == "blocked":
+        sub = ctx.db.one("SELECT id FROM submissions WHERE task_id = ? ORDER BY created_at DESC LIMIT 1", (integ["id"],))
+        rows = ctx.db.query("SELECT criterion, check_kind FROM reviews WHERE submission_id = ? AND verdict = 'inconclusive'",
+                            (sub["id"],))
+        assert [r["check_kind"] for r in rows] == ["owner_approval"], [dict(r) for r in rows]
+        assert sup.owner_review(sub["id"], criterion=rows[0]["criterion"], verdict="pass",
+                                note="owner ran the combined tests")["verdict"] == "accepted"
+        st = await sup.wait_idle(mid, timeout=60)
+        integ = tasks(ctx, mid)["integrate"]
     if st != "completed":
         for r in ctx.db.query("SELECT s.round, s.status, r.check_kind, r.verdict, r.findings_json FROM submissions s LEFT JOIN"
                               " reviews r ON r.submission_id = s.id WHERE s.task_id = ?", (integ["id"],)):

@@ -168,6 +168,13 @@ def materialize_plan(cur: sqlite3.Cursor, *, plan_task_id: str | None, plan: dic
                                    "check": {"kind": "no_conflicts"}})
                 acceptance.append({"id": f"A{len(acceptance)+1}", "text": "Combined result parses",
                                    "check": {"kind": "python_syntax"}})
+            if deps_code and "sandbox_command" not in kinds:
+                # The combined code must pass the project's tests, not only each branch on its own.
+                acceptance.append({"id": f"A{len(acceptance)+1}",
+                                   "text": "Combined code passes the project's tests in the sandbox" +
+                                           ("" if sandbox_ok else " (owner approval: sandbox unavailable)"),
+                                   "check": {"kind": "sandbox_command"} if sandbox_ok else
+                                   {"kind": "owner_approval", "args": {"reason": "sandbox unavailable"}}})
         tdict = {**t, "acceptance": acceptance}
         strat = choose_strategy(tdict, open_conflicts=open_conflicts, sandbox_ok=sandbox_ok)
         if t["kind"] in ("code", "integrate") and base_commit:

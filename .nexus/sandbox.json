@@ -5,5 +5,14 @@
   "memory_mb": 2048,
   "cpus": 2,
   "tmpfs_mb": 1024,
-  "timeout_s": 600
+  "timeout_s": 600,
+  "test_command": [
+    "python",
+    "-m",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/service"
+  ]
 }

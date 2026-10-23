@@ -38,6 +38,11 @@ def clean_profile(raw: dict[str, Any] | None) -> dict[str, Any]:
             p[k] = min(max(float(raw[k]), lo), hi)
             if k != "cpus":
                 p[k] = int(p[k])
+    tc = raw.get("test_command")
+    if tc:
+        if not (isinstance(tc, list) and 0 < len(tc) <= 30 and all(isinstance(x, str) and len(x) <= 300 for x in tc)):
+            raise ValueError("test_command must be a list of strings (argv)")
+        p["test_command"] = list(tc)
     return p
 
 

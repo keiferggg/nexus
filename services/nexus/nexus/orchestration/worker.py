@@ -377,8 +377,23 @@ class TaskWorker:
         strat = loads(task["strategy_json"], {})
         base = strat.get("base_commit") or await self.ctx.worktrees.head(repo)
         wt = await self.ctx.worktrees.create(repo, f"{task['key']}-{task['id'][-6:]}", base)
+        # Code that depends on other code starts from their accepted work, not from the mission's base commit.
+        # Seen live: a "run the full suite" task planned after an "implement" task would otherwise have tested the
+        # unchanged code and passed.
+        from ..tools.worktree import git
+
+        upstream = [i for i in self._inputs(task) if i["meta"].get("kind") in ("code", "integrate_code") and i["meta"].get("head")]
+        for i in upstream:
+            m = await git(wt["path"], "merge", "--no-ff", "--no-edit", "-m", f"NEXUS: include accepted {i['task_key']}",
+                          i["meta"]["head"], check=False)
+            if m.returncode != 0:
+                await git(wt["path"], "merge", "--abort", check=False)
+                raise ProviderError("bad_request", f"accepted work from {i['task_key']} does not merge cleanly into this"
+                                                   f" task's worktree: {(m.stdout + m.stderr)[-300:]}")
+        own_base = await self.ctx.worktrees.head(wt["path"])  # this task's changes are measured from here
         sections = self._sections(task, mission, project, agent, feedback, "code")
-        sections["workspace"] = [{"worktree_branch": wt["branch"], "base_commit": base}]
+        sections["workspace"] = [{"worktree_branch": wt["branch"], "base_commit": base,
+                                  "includes_accepted_work_from": [i["task_key"] for i in upstream]}]
         text, ctx_id = self._store_packet(task, sections, round)
         system = roles.system_prompt("engineer", agent["charter"] if agent else "", roles.CODE_OUTPUT)
         data = await self._loop(task=task, mission=mission, project=project, agent=agent, policy=policy, system=system,
@@ -388,8 +403,8 @@ class TaskWorker:
         self._fence()
         head = await self.ctx.worktrees.commit_all(wt["path"], f"NEXUS {task['key']} round {round}") or \
             await self.ctx.worktrees.head(wt["path"])
-        diff = await self.ctx.worktrees.diff(wt["path"], base)
-        changed = await self.ctx.worktrees.changed_files(wt["path"], base)
+        diff = await self.ctx.worktrees.diff(wt["path"], own_base)
+        changed = await self.ctx.worktrees.changed_files(wt["path"], own_base)
         with self.ctx.db.tx() as cur:
             art = self.ctx.artifacts.create(cur, project_id=task["project_id"], kind="diff", title=task["title"],
                                             content=diff or "(no changes)", media_type="text/x-diff",
