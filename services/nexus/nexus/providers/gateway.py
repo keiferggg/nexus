@@ -136,17 +136,20 @@ class ProviderRegistry:
         return {"status": status, "detail": detail, "models": [m.id for m in models]}
 
     # ---- pricing ---------------------------------------------------------------------------
-    def set_price(self, provider_id: str, model: str, input_per_mtok: float, output_per_mtok: float, source: str) -> int:
-        if input_per_mtok < 0 or output_per_mtok < 0:
+    def set_price(self, provider_id: str, model: str, input_per_mtok: float, output_per_mtok: float, source: str,
+                  cached_input_per_mtok: float | None = None) -> int:
+        if input_per_mtok < 0 or output_per_mtok < 0 or (cached_input_per_mtok is not None and cached_input_per_mtok < 0):
             raise ValueError("prices must be non-negative")
         with self.db.tx() as cur:
             v = cur.execute("SELECT COALESCE(MAX(version),0) AS v FROM model_prices WHERE provider_id=? AND model=?",
                             (provider_id, model)).fetchone()["v"] + 1
             cur.execute("INSERT INTO model_prices (id, provider_id, model, input_per_mtok_usd, output_per_mtok_usd, source,"
-                        " version, created_at) VALUES (?,?,?,?,?,?,?,?)",
-                        (new_id("prc"), provider_id, model, input_per_mtok, output_per_mtok, source, v, now_iso()))
+                        " version, created_at, cached_input_per_mtok_usd) VALUES (?,?,?,?,?,?,?,?,?)",
+                        (new_id("prc"), provider_id, model, input_per_mtok, output_per_mtok, source, v, now_iso(),
+                         cached_input_per_mtok))
             emit(cur, "pricing.set", "owner", {"provider_id": provider_id, "model": model, "version": v,
-                                               "input_per_mtok_usd": input_per_mtok, "output_per_mtok_usd": output_per_mtok})
+                                               "input_per_mtok_usd": input_per_mtok, "output_per_mtok_usd": output_per_mtok,
+                                               "cached_input_per_mtok_usd": cached_input_per_mtok})
         return v
 
     def price(self, provider_id: str, model: str) -> dict[str, Any] | None:
@@ -154,7 +157,7 @@ class ProviderRegistry:
                         (provider_id, model))
         if r is not None:
             return {"in": r["input_per_mtok_usd"], "out": r["output_per_mtok_usd"], "version": r["version"],
-                    "source": r["source"]}
+                    "source": r["source"], "cached_in": r["cached_input_per_mtok_usd"]}
         kind = self.get_row(provider_id)["kind"]
         if kind in FREE_KINDS:
             return {"in": 0.0, "out": 0.0, "version": 0, "source": f"default: {kind} runs locally (no API charge)"}
@@ -173,6 +176,17 @@ TRUNCATED = {"length", "max_tokens"}  # openai/deepseek/ollama, anthropic
 OUTPUT_CEILING = 16384
 RETRY_MARK = ":more"  # operation-id suffix of a truncation retry, followed by the limit it used
 RETRY_LIMIT_RE = re.compile(r":more(\d+)$")
+
+
+
+def call_cost(usage, price: dict[str, Any]) -> float:
+    """Cost from provider-reported tokens. Cached input (reported by the provider) is billed at the cached rate when
+    the owner configured one; otherwise at the normal input rate, which can only overstate the cost."""
+    cached = min(max(int(getattr(usage, "cached_input_tokens", 0) or 0), 0), usage.input_tokens)
+    cached_rate = price.get("cached_in")
+    if cached_rate is None:
+        cached_rate = price["in"]
+    return ((usage.input_tokens - cached) * price["in"] + cached * cached_rate + usage.output_tokens * price["out"]) / 1_000_000
 
 
 class ModelGateway:
@@ -294,7 +308,7 @@ class ModelGateway:
 
         actual = None
         if result.usage is not None and not price.get("unpriced"):
-            actual = (result.usage.input_tokens * price["in"] + result.usage.output_tokens * price["out"]) / 1_000_000
+            actual = call_cost(result.usage, price)
         with self.db.tx() as cur:
             out = self.artifacts.create(cur, project_id=project_id or "", kind="model_output",
                                         title=f"{purpose} output", content=dumps(result.to_record()),
@@ -306,9 +320,11 @@ class ModelGateway:
                 else:
                     reconcile(cur, res_id, actual_usd=actual, status="reconciled")
             cur.execute(
-                "UPDATE model_calls SET status='succeeded', input_tokens=?, output_tokens=?, usage_reported=?, actual_usd=?,"
+                "UPDATE model_calls SET status='succeeded', input_tokens=?, output_tokens=?, cached_input_tokens=?,"
+                " usage_reported=?, actual_usd=?,"
                 " output_artifact_id=?, ended_at=? WHERE id=?",
                 (result.usage.input_tokens if result.usage else None, result.usage.output_tokens if result.usage else None,
+                 result.usage.cached_input_tokens if result.usage else None,
                  int(result.usage is not None), actual, out["id"] if out else None, now_iso(), call_id),
             )
             emit(cur, "model_call.finished", agent_id or "nexus:gateway",

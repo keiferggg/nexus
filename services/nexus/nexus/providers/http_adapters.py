@@ -138,7 +138,8 @@ class AnthropicAdapter(_HttpAdapter):
         usage = None
         if isinstance(u, dict) and "input_tokens" in u and "output_tokens" in u:
             usage = Usage(int(u["input_tokens"]) + int(u.get("cache_creation_input_tokens") or 0)
-                          + int(u.get("cache_read_input_tokens") or 0), int(u["output_tokens"]))
+                          + int(u.get("cache_read_input_tokens") or 0), int(u["output_tokens"]),
+                          int(u.get("cache_read_input_tokens") or 0))
         return CompletionResult(text, calls, usage, data.get("stop_reason"), data.get("model", ""), data.get("id"))
 
     async def complete(self, req: CompletionRequest, *, timeout_s: float) -> CompletionResult:
@@ -211,7 +212,10 @@ class OpenAIAdapter(_HttpAdapter):
         u = data.get("usage")
         usage = None
         if isinstance(u, dict) and "prompt_tokens" in u and "completion_tokens" in u:
-            usage = Usage(int(u["prompt_tokens"]), int(u["completion_tokens"]))
+            cached = u.get("prompt_cache_hit_tokens")
+            if cached is None:
+                cached = (u.get("prompt_tokens_details") or {}).get("cached_tokens")
+            usage = Usage(int(u["prompt_tokens"]), int(u["completion_tokens"]), int(cached or 0))
         return CompletionResult(msg.get("content") or "", calls, usage, choice.get("finish_reason"),
                                 data.get("model", ""), data.get("id"), reasoning=msg.get("reasoning_content") or None)
 

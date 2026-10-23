@@ -36,6 +36,32 @@ def _read_text(p: Path) -> str:
     return p.read_text(encoding="utf-8", errors="replace")
 
 
+READ_PAGE_CHARS = 9000  # one read returns at most this much text; larger files are read in pages
+
+
+def _page(text: str, args: dict[str, Any]) -> dict[str, Any]:
+    """A slice of a text file by line numbers (1-based, inclusive). Seen live: tool results were capped and a 19k
+    file could never be read past the cap, so an engineer re-read it in a loop. Every result now says where it ends
+    and where to continue."""
+    lines = text.splitlines()
+    total = len(lines)
+    start = max(1, int(args.get("start_line") or 1))
+    end = min(int(args.get("end_line") or total), total)
+    out, size, last = [], 0, start - 1
+    for n in range(start, end + 1):
+        line = lines[n - 1]
+        if out and size + len(line) + 1 > READ_PAGE_CHARS:
+            break
+        out.append(line)
+        size += len(line) + 1
+        last = n
+    res: dict[str, Any] = {"content": "\n".join(out), "start_line": start, "end_line": last, "total_lines": total}
+    if last < end:
+        res["next_start_line"] = last + 1
+        res["note"] = f"partial: lines {start}-{last} of {total}; read again with start_line={last + 1} for more"
+    return res
+
+
 async def list_files(broker, ctx: ToolContext, args: dict[str, Any]) -> Any:
     root = ctx.workspace_root.resolve()
     base = resolve_within(root, args.get("path") or ".") if args.get("path") not in (None, "", ".") else root
@@ -57,7 +83,7 @@ async def read_file(broker, ctx: ToolContext, args: dict[str, Any]) -> Any:
     text = _read_text(p)
     warn = record_exposure(broker.db, project_id=ctx.project_id, mission_id=ctx.mission_id, task_id=ctx.task_id,
                            attempt_id=ctx.attempt_id, source=str(args["path"]), text=text)
-    return {"path": args["path"], "content": text, "untrusted": True, **({"injection_warning": warn} if warn else {})}
+    return {"path": args["path"], **_page(text, args), "untrusted": True, **({"injection_warning": warn} if warn else {})}
 
 
 async def read_source(broker, ctx: ToolContext, args: dict[str, Any]) -> Any:
@@ -133,7 +159,56 @@ def _wt(ctx: ToolContext) -> Path:
 
 async def repo_read(broker, ctx: ToolContext, args: dict[str, Any]) -> Any:
     p = resolve_within(_wt(ctx), args["path"])
-    return {"path": args["path"], "content": _read_text(p), "untrusted": True}
+    return {"path": args["path"], **_page(_read_text(p), args), "untrusted": True}
+
+
+async def repo_search(broker, ctx: ToolContext, args: dict[str, Any]) -> Any:
+    """Regex search across the worktree (like grep -n): find where to look before reading whole files."""
+    import fnmatch
+
+    try:
+        rx = re.compile(args["pattern"])
+    except re.error as exc:
+        raise ToolDenied(f"invalid regex: {exc}") from None
+    root = _wt(ctx).resolve()
+    glob = args.get("path_glob") or "*"
+    hits, scanned = [], 0
+    for f in sorted(root.rglob("*")):
+        rel = f.relative_to(root)
+        if not f.is_file() or ".git" in rel.parts or not fnmatch.fnmatch(str(rel).replace("\\", "/"), glob):
+            continue
+        if f.stat().st_size > MAX_READ_BYTES:
+            continue
+        try:
+            text = f.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        scanned += 1
+        for n, line in enumerate(text.splitlines(), 1):
+            if rx.search(line):
+                hits.append({"path": str(rel).replace("\\", "/"), "line": n, "text": line.strip()[:200]})
+                if len(hits) >= 80:
+                    return {"matches": hits, "truncated": True, "files_scanned": scanned}
+    return {"matches": hits, "truncated": False, "files_scanned": scanned}
+
+
+async def repo_edit(broker, ctx: ToolContext, args: dict[str, Any]) -> Any:
+    """Exact text replacement in one file: change part of a large file without rewriting (or even reading) all of
+    it. old_string must occur exactly once unless replace_all; the file's line endings are kept."""
+    p = resolve_within(_wt(ctx), args["path"])
+    raw = _read_text(p) if p.is_file() else None
+    if raw is None:
+        raise ToolDenied(f"not a file: {args['path']} (use repo_write to create files)")
+    crlf = b"\r\n" in p.read_bytes()
+    old, new = args["old_string"], args["new_string"]
+    n = raw.count(old)
+    if not old or n == 0:
+        raise ToolDenied("old_string not found; read the file (or repo_search) and copy the text exactly")
+    if n > 1 and not args.get("replace_all"):
+        raise ToolDenied(f"old_string occurs {n} times; include more surrounding text or set replace_all")
+    text = raw.replace(old, new) if args.get("replace_all") else raw.replace(old, new, 1)
+    p.write_text(text, encoding="utf-8", newline="\r\n" if crlf else "\n")
+    return {"path": args["path"], "replacements": n if args.get("replace_all") else 1, "bytes": len(text.encode("utf-8"))}
 
 
 async def repo_list(broker, ctx: ToolContext, args: dict[str, Any]) -> Any:
@@ -207,8 +282,10 @@ def register(broker) -> None:
     S = {"type": "string"}
     broker.register(ToolDef("list_files", READ_ONLY, "List files in the project workspace (optionally under a path).",
                             _obj({"path": S}, []), list_files))
-    broker.register(ToolDef("read_file", READ_ONLY, "Read a text file inside the project workspace.",
-                            _obj({"path": S}, ["path"]), read_file))
+    PAGE = {"start_line": {"type": "integer", "description": "first line (1-based); default 1"},
+            "end_line": {"type": "integer", "description": "last line (inclusive); default end of file"}}
+    broker.register(ToolDef("read_file", READ_ONLY, "Read a text file inside the project workspace (large files come in"
+                            " pages: use start_line/end_line).", _obj({"path": S, **PAGE}, ["path"]), read_file))
     broker.register(ToolDef("read_source", READ_ONLY,
                             "Read a workspace document and record it as evidence. Returns evidence_id to cite as [E:id].",
                             _obj({"path": S}, ["path"]), read_source))
@@ -217,8 +294,15 @@ def register(broker) -> None:
     broker.register(ToolDef("search_memory", READ_ONLY, "Search memory you are permitted to read.",
                             _obj({"query": S}, ["query"]), search_memory))
     broker.register(ToolDef("repo_list", READ_ONLY, "List files in your isolated git worktree.", _obj({}, []), repo_list))
-    broker.register(ToolDef("repo_read", READ_ONLY, "Read a file in your isolated git worktree.",
-                            _obj({"path": S}, ["path"]), repo_read))
+    broker.register(ToolDef("repo_read", READ_ONLY, "Read a file in your isolated git worktree (large files come in pages:"
+                            " use start_line/end_line).", _obj({"path": S, **PAGE}, ["path"]), repo_read))
+    broker.register(ToolDef("repo_search", READ_ONLY, "Regex search across your worktree; returns path, line number and"
+                            " text of each match (max 80). Optional path_glob such as 'services/**/*.py'.",
+                            _obj({"pattern": S, "path_glob": S}, ["pattern"]), repo_search))
+    broker.register(ToolDef("repo_edit", LOCAL_WRITE, "Replace exact text in one file of your worktree (old_string must"
+                            " match exactly once unless replace_all). Prefer this to repo_write for existing files.",
+                            _obj({"path": S, "old_string": S, "new_string": S, "replace_all": {"type": "boolean"}},
+                                 ["path", "old_string", "new_string"]), repo_edit))
     broker.register(ToolDef("repo_write", LOCAL_WRITE, "Write a file in your isolated git worktree (reversible via git).",
                             _obj({"path": S, "content": S}, ["path", "content"]), repo_write))
     broker.register(ToolDef("run_tests", LOCAL_WRITE, "Run the test command inside the host-managed sandbox.",
@@ -232,8 +316,8 @@ def register(broker) -> None:
         "read_source": {"read_source"},
         "fetch_url": {"fetch_url"},
         "search_memory": {"search_memory"},
-        "repo_read": {"repo_list", "repo_read"},
-        "repo_write": {"repo_write"},
+        "repo_read": {"repo_list", "repo_read", "repo_search"},
+        "repo_write": {"repo_write", "repo_edit"},
         "run_tests": {"run_tests"},
         "http_post": {"http_post"},
     }

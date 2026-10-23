@@ -48,6 +48,7 @@ class PriceIn(BaseModel):
     model: str
     input_per_mtok_usd: float
     output_per_mtok_usd: float
+    cached_input_per_mtok_usd: float | None = None
     source: str = "owner-configured"
 
 
@@ -224,8 +225,14 @@ def create_app(ctx: AppContext, *, token: str, allowed_origins: list[str] | None
         narrator.start()
         if os.environ.get("NEXUS_AUTOPILOT", "1") != "0":
             chat.autopilot.start()
+        from ..providers.balance import BalanceWatcher
+
+        balances = BalanceWatcher(ctx)
+        if os.environ.get("NEXUS_BALANCE_WATCH", "1") != "0":
+            balances.start()
         state["started"] = True
         yield
+        await balances.stop()
         await chat.autopilot.stop()
         await narrator.stop()
         await sup.stop()
@@ -305,7 +312,8 @@ def create_app(ctx: AppContext, *, token: str, allowed_origins: list[str] | None
         out = []
         for r in db.query("SELECT * FROM providers ORDER BY created_at"):
             v = ctx.registry.public_view(r)
-            v["prices"] = [dict(p) for p in db.query("SELECT model, input_per_mtok_usd, output_per_mtok_usd, source, version"
+            v["prices"] = [dict(p) for p in db.query("SELECT model, input_per_mtok_usd, output_per_mtok_usd,"
+                                                     " cached_input_per_mtok_usd, source, version"
                                                      " FROM model_prices WHERE provider_id = ? ORDER BY model, version",
                                                      (r["id"],))]
             out.append(v)
@@ -348,8 +356,22 @@ def create_app(ctx: AppContext, *, token: str, allowed_origins: list[str] | None
 
     @app.post("/api/providers/{pid}/prices")
     async def set_price(pid: str, body: PriceIn):
-        v = ctx.registry.set_price(pid, body.model, body.input_per_mtok_usd, body.output_per_mtok_usd, body.source)
+        v = ctx.registry.set_price(pid, body.model, body.input_per_mtok_usd, body.output_per_mtok_usd, body.source,
+                                  body.cached_input_per_mtok_usd)
         return {"version": v}
+
+    @app.get("/api/providers/{pid}/balance")
+    async def provider_balance(pid: str):
+        from ..providers.balance import comparison, supports_balance
+
+        return {"supported": supports_balance(ctx.registry.get_row(pid)), **comparison(db, pid)}
+
+    @app.post("/api/providers/{pid}/balance/refresh")
+    async def provider_balance_refresh(pid: str):
+        from ..providers.balance import comparison, snapshot
+
+        await snapshot(ctx, pid)
+        return {"supported": True, **comparison(db, pid)}
 
     # ---- projects & agents -----------------------------------------------------------------
     @app.get("/api/projects")

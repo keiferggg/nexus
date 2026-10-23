@@ -336,3 +336,22 @@ Total live spend across all missions: $1.56 (by owner-configured prices; not inv
   installer is refused and the popup says so.
 - Packaged-app tests (NEXUS_PACKAGED=1, dry-run installer): 4 passed, including "a newly published build is noticed
   within seconds and installs itself after the countdown" (no click) and "Not now skips the countdown". UI tests: 7 passed.
+
+## 0.2.19 — tools for real code, exact cost, provider balance check
+- Second live Autopilot run (after 0.2.17): input per call fell to ~25-29k tokens, but it again hit its $2 cap
+  ($1.95: engineer $1.34 over 50 calls, improvement selection $0.42, plan $0.17). Cause: tool results are capped, a
+  19k-character test file could never be read past the cap, so the engineer re-read it repeatedly and reported (honestly)
+  that it could not make the edit; `repo_write` needs the whole file. Also its sandbox check failed with exit 127: the
+  planner wrote the command as one string, which ran as a program named "python -m pytest ...".
+- Fixes: `read_file` and `repo_read` return pages (start_line/end_line, total_lines, next_start_line; at most 9,000
+  characters a page); new `repo_search` (regex, path glob, line numbers) and `repo_edit` (exact replacement, must match
+  once unless replace_all, keeps CRLF/LF); sandbox commands given as one string are split like a POSIX shell.
+- Exact cost: DeepSeek reports `prompt_cache_hit_tokens` (OpenAI `prompt_tokens_details.cached_tokens`, Anthropic
+  `cache_read_input_tokens`); NEXUS records them per call and bills them at an optional cache-hit rate (without one,
+  at the full input rate, which can only overstate). Provider balance: for DeepSeek, `GET /user/balance` every 10
+  minutes and on demand; Settings → Providers shows what the provider deducted (decreases between checks, top-ups
+  ignored) next to NEXUS's computed spend over the same period.
+- Tests: tests/service/test_code_tools.py (4: paging to the end, search + single-place edit, CRLF preserved, string
+  commands) and test_cached_input_is_billed_at_the_cached_rate_and_balance_is_compared (simulator reports 75% cache
+  hits and a balance; per-call cost matches the formula exactly; a top-up is not counted). Service suite: 109 passed.
+  UI tests: 7 passed (a label clash between the input and cache-hit fields was found by the test and fixed).

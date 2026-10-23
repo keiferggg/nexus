@@ -56,6 +56,18 @@ def project_profile(db, project_id: str | None) -> dict[str, Any]:
         return dict(DEFAULT_PROFILE)
 
 
+def as_argv(command: Any) -> list[str]:
+    """Commands may arrive as one string ("python -m pytest -q"): seen live, a planner wrote it that way and the
+    container looked for a program literally named "python -m pytest -q" (exit 127). Split it like a POSIX shell."""
+    import shlex
+
+    if isinstance(command, str):
+        return shlex.split(command)
+    if isinstance(command, list) and all(isinstance(c, str) for c in command):
+        return command
+    raise ValueError("command must be a list of strings or a command line string")
+
+
 def repo_sandbox_spec(root: Path) -> dict[str, Any] | None:
     """A repository can describe its own test sandbox in .nexus/sandbox.json:
     {"image": "name:tag", "dockerfile": "path/in/repo", "context": "path/in/repo", "memory_mb": …, "cpus": …,
@@ -132,8 +144,9 @@ class DockerSandbox:
         ok, why = await self.available(image=p["image"])
         if not ok:
             raise RuntimeError(f"sandbox unavailable: {why}")
-        if not all(isinstance(c, str) for c in command) or not command:
-            raise ValueError("command must be a non-empty list of strings")
+        command = as_argv(command)
+        if not command:
+            raise ValueError("command must not be empty")
         name = f"nexus-sbx-{uuid.uuid4().hex[:12]}"
         args = ["run", "--rm", "--name", name, "--network", "none", "--memory", f"{p['memory_mb']}m",
                 "--cpus", str(p["cpus"]), "--pids-limit", "512", "--read-only",

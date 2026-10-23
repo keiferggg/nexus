@@ -76,6 +76,7 @@ class CompletionRequest:
 class Usage:
     input_tokens: int
     output_tokens: int
+    cached_input_tokens: int = 0  # part of input_tokens served from the provider's prompt cache (cheaper)
 
 
 @dataclass
@@ -92,7 +93,8 @@ class CompletionResult:
         return {
             "text": self.text,
             "tool_calls": [{"id": t.id, "name": t.name, "arguments": t.arguments} for t in self.tool_calls],
-            "usage": None if self.usage is None else {"input": self.usage.input_tokens, "output": self.usage.output_tokens},
+            "usage": None if self.usage is None else {"input": self.usage.input_tokens, "output": self.usage.output_tokens,
+                                                      "cached": self.usage.cached_input_tokens},
             "stop_reason": self.stop_reason,
             "model": self.model,
             "raw_id": self.raw_id,
@@ -105,7 +107,7 @@ class CompletionResult:
         return cls(
             text=d.get("text", ""),
             tool_calls=[ToolCall(t["id"], t["name"], t.get("arguments", {})) for t in d.get("tool_calls", [])],
-            usage=None if u is None else Usage(u["input"], u["output"]),
+            usage=None if u is None else Usage(u["input"], u["output"], int(u.get("cached") or 0)),
             stop_reason=d.get("stop_reason"),
             model=d.get("model", ""),
             raw_id=d.get("raw_id"),

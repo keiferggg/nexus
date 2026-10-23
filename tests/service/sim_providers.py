@@ -45,6 +45,8 @@ class ProviderSim(httpx.AsyncBaseTransport):
     def __init__(self, fmt: str, brain=demo_script, reasoning_tokens: int = 0):
         self.fmt = fmt
         self.reasoning_tokens = reasoning_tokens  # hidden reasoning that counts against max_tokens (DeepSeek-style)
+        self.cache_hit_ratio = 0.0  # DeepSeek: share of prompt tokens reported as prompt_cache_hit_tokens
+        self.balance = 10.0  # DeepSeek GET /user/balance (USD)
         self.brain = brain
         self.violations: list[str] = []
         self.requests = 0
@@ -57,6 +59,10 @@ class ProviderSim(httpx.AsyncBaseTransport):
 
     async def handle_async_request(self, request):
         path = request.url.path
+        if request.method == "GET" and path == "/user/balance" and self.fmt == "deepseek":
+            return httpx.Response(200, json={"is_available": True, "balance_infos": [
+                {"currency": "USD", "total_balance": f"{self.balance:.2f}", "granted_balance": "0.00",
+                 "topped_up_balance": f"{self.balance:.2f}"}]})
         if request.method == "GET":
             if self.fmt == "anthropic":
                 return httpx.Response(200, json={"data": [{"id": "sim-claude", "display_name": "Sim"}], "has_more": False})
@@ -174,7 +180,9 @@ class ProviderSim(httpx.AsyncBaseTransport):
                                  for c in calls]
         return httpx.Response(200, json={"id": f"chatcmpl-{self.requests}", "model": b["model"], "choices": [
             {"index": 0, "message": msg, "finish_reason": finish or ("tool_calls" if calls else "stop")}],
-            "usage": {"prompt_tokens": i, "completion_tokens": o, "total_tokens": i + o}})
+            "usage": {"prompt_tokens": i, "completion_tokens": o, "total_tokens": i + o,
+                      **({"prompt_cache_hit_tokens": int(i * self.cache_hit_ratio),
+                          "prompt_cache_miss_tokens": i - int(i * self.cache_hit_ratio)} if self.fmt == "deepseek" else {})}})
 
     # ---- ollama ----
     def _parse_ollama(self, b, request):

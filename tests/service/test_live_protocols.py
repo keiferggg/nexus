@@ -255,3 +255,39 @@ def test_old_tool_results_are_elided_but_recent_ones_stay_whole():
     assert sum(len(m.content) for m in tools) < before / 3
     assert tools[0].content.startswith("file 0 ") and "call the tool again" in tools[0].content
     assert [m.tool_call_id for m in tools] == [f"c{i}" for i in range(12)], "pairing with tool calls is preserved"
+
+
+async def test_cached_input_is_billed_at_the_cached_rate_and_balance_is_compared(live):
+    """DeepSeek reports how many prompt tokens were cache hits (billed lower); NEXUS used to bill them all at the
+    full input rate. The account balance endpoint lets the owner compare NEXUS's computed spend with real deductions."""
+    from nexus.providers.balance import comparison, snapshot
+
+    c, sup = live
+    pid, model, _ = configure(c, "deepseek")
+    sim = ProviderSim("deepseek")
+    sim.cache_hit_ratio = 0.75
+    c.registry.register_override(pid, SETUPS["deepseek"][0](sim))
+    c.registry.set_price(pid, model, 0.28, 0.42, source="test", cached_input_per_mtok=0.028)
+    with c.db.tx() as cur:
+        cur.execute("UPDATE providers SET status = 'ok' WHERE id = ?", (pid,))
+    first = await snapshot(c, pid)
+    assert first["total_balance"] == 10.0 and first["currency"] == "USD"
+    proj = create_demo_project(c, "research")
+    mid = new_mission(c, proj, mode="live", cap=1.0)
+    assert await sup.wait_idle(mid, timeout=90) == "completed"
+    calls = c.db.query("SELECT input_tokens, cached_input_tokens, output_tokens, actual_usd FROM model_calls"
+                       " WHERE mission_id = ?", (mid,))
+    for x in calls:
+        assert x["cached_input_tokens"] == int(x["input_tokens"] * 0.75)
+        expect = ((x["input_tokens"] - x["cached_input_tokens"]) * 0.28 + x["cached_input_tokens"] * 0.028
+                  + x["output_tokens"] * 0.42) / 1_000_000
+        assert abs(x["actual_usd"] - expect) < 1e-12
+    spent = sum(x["actual_usd"] for x in calls)
+    sim.balance = 10.0 - round(spent, 2) - 0.01  # what the provider deducted
+    await snapshot(c, pid)
+    sim.balance += 5.0  # a top-up is not counted as spend
+    await snapshot(c, pid)
+    cmp = comparison(c.db, pid)
+    assert cmp["snapshots"] == 3 and cmp["topups"] == 5.0 and cmp["calls"] == len(calls)
+    assert abs(cmp["deducted"] - (round(spent, 2) + 0.01)) < 1e-9
+    assert abs(cmp["nexus_computed_usd"] - round(spent, 4)) < 1e-4

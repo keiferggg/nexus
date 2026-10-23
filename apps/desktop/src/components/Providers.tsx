@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { del, post, put, useApi } from "../api";
+import { del, post, put, timeAgo, useApi } from "../api";
 import { PriceFix } from "./PriceFix";
 import { Badge, Button, Field, Load, Status } from "./ui";
 
@@ -73,6 +73,7 @@ function ProviderRow({ p, reload }: { p: any; reload: () => void }) {
   const [model, setModel] = useState("");
   const [pin, setPin] = useState("");
   const [pout, setPout] = useState("");
+  const [pcache, setPcache] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [newKey, setNewKey] = useState("");
@@ -120,10 +121,11 @@ function ProviderRow({ p, reload }: { p: any; reload: () => void }) {
                 <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>{check.results.map((r: any) => <li key={r.check}>{r.passed ? "✓" : "✗"} {r.check.replace(/_/g, " ")} — {r.detail}</li>)}</ul>
               </div>
             )}
+            <BalanceCheck providerId={p.id} />
             <h4>Prices (required for paid execution)</h4>
             {p.prices.length === 0 ? <div className="small muted">No prices configured. Live missions using this provider are refused until a price is set for the model they use. Provider APIs do not report prices; enter the provider's published rate.</div> : (
-              <table className="data"><thead><tr><th>Model</th><th>Input $/Mtok</th><th>Output $/Mtok</th><th>Source</th><th>v</th></tr></thead>
-                <tbody>{p.prices.map((x: any) => <tr key={`${x.model}${x.version}`}><td className="mono">{x.model}</td><td>{x.input_per_mtok_usd}</td><td>{x.output_per_mtok_usd}</td><td className="small">{x.source}</td><td>{x.version}</td></tr>)}</tbody></table>)}
+              <table className="data"><thead><tr><th>Model</th><th>Input $/Mtok</th><th>Cache-hit input</th><th>Output $/Mtok</th><th>Source</th><th>v</th></tr></thead>
+                <tbody>{p.prices.map((x: any) => <tr key={`${x.model}${x.version}`}><td className="mono">{x.model}</td><td>{x.input_per_mtok_usd}</td><td>{x.cached_input_per_mtok_usd ?? "—"}</td><td>{x.output_per_mtok_usd}</td><td className="small">{x.source}</td><td>{x.version}</td></tr>)}</tbody></table>)}
             <div className="row wrap">
               <label className="sr-only" htmlFor={`pm-${p.id}`}>Model</label>
               <select id={`pm-${p.id}`} value={model} onChange={(e) => setModel(e.target.value)} style={{ width: 260 }}>
@@ -131,9 +133,10 @@ function ProviderRow({ p, reload }: { p: any; reload: () => void }) {
                 {p.models.map((m: string) => <option key={m} value={m}>{m}</option>)}
               </select>
               <input aria-label="input price per million tokens" type="number" min="0" step="0.01" placeholder="input $/Mtok" value={pin} onChange={(e) => setPin(e.target.value)} style={{ width: 120 }} />
+              <input aria-label="cache-hit rate per million tokens" type="number" min="0" step="0.001" placeholder="cache-hit input $/Mtok (optional)" value={pcache} onChange={(e) => setPcache(e.target.value)} style={{ width: 200 }} />
               <input aria-label="output price per million tokens" type="number" min="0" step="0.01" placeholder="output $/Mtok" value={pout} onChange={(e) => setPout(e.target.value)} style={{ width: 120 }} />
               <Button size="sm" disabled={busy || !model || pin === "" || pout === ""}
-                      onClick={() => act(() => post(`/api/providers/${p.id}/prices`, { model, input_per_mtok_usd: Number(pin), output_per_mtok_usd: Number(pout), source: `owner-configured ${new Date().toISOString().slice(0, 10)}` }))}>Save price</Button>
+                      onClick={() => act(() => post(`/api/providers/${p.id}/prices`, { model, input_per_mtok_usd: Number(pin), output_per_mtok_usd: Number(pout), cached_input_per_mtok_usd: pcache === "" ? null : Number(pcache), source: `owner-configured ${new Date().toISOString().slice(0, 10)}` }))}>Save price</Button>
             </div>
           </>
         )}
@@ -179,5 +182,27 @@ export function DefaultModelPicker() {
         </div>
       );
     }}</Load>
+  );
+}
+
+/** What the provider says it actually deducted (from its balance endpoint) next to NEXUS's computed spend. */
+function BalanceCheck({ providerId }: { providerId: string }) {
+  const q = useApi<any>(`/api/providers/${providerId}/balance`, (e) => e.type === "model_call.finished");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const d = q.data;
+  if (!d?.supported) return null;
+  return (
+    <div className="callout info small" data-testid="balance-check">
+      <div className="row wrap"><strong className="grow">Real spend check (from the provider's balance)</strong>
+        <Button size="sm" disabled={busy} onClick={async () => { setBusy(true); setErr(null); try { await post(`/api/providers/${providerId}/balance/refresh`); q.reload(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); } }}>{busy ? "Checking…" : "Check now"}</Button></div>
+      {d.snapshots ? (
+        <div>Balance {d.balance.toFixed(2)} {d.currency} ({timeAgo(d.as_of)}). Since {new Date(d.since).toLocaleString()}: the provider deducted
+          <strong> {d.deducted.toFixed(4)} {d.currency}</strong>; NEXUS computed <strong>${d.nexus_computed_usd.toFixed(4)}</strong> over {d.calls} call(s)
+          {d.topups > 0 ? ` (top-ups ignored: ${d.topups.toFixed(2)})` : ""}.{!d.comparable && " Different currency: compare by eye."}
+          <div className="xs faint">{d.note}</div></div>
+      ) : <div>No balance checked yet. NEXUS checks every 10 minutes; press Check now to start.</div>}
+      {err && <div style={{ color: "var(--bad)" }}>{err}</div>}
+    </div>
   );
 }
