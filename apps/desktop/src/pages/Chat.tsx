@@ -263,13 +263,26 @@ function AutopilotCard({ m }: { m: any }) {
   const d = m.data || {};
   const q = useApi<any>("/api/autopilot", (e) => e.type.startsWith("autopilot.") || e.type.startsWith("mission.") || e.type === "model_call.finished");
   const a = (q.data?.standing ?? []).find((x: any) => x.id === d.standing_id);
+  const [err, setErr] = useState<string | null>(null);
+  // Seen live: the last run was blocked on its cap, so the Autopilot waited and "Run now" was disabled with no
+  // explanation. Say so, and offer to cancel the stuck run here.
+  const stuck = a ? (a.runs ?? []).find((r: any) => r.mission_id === a.active_run && ["blocked", "paused"].includes(r.status)) : null;
   return (
     <div className="autopilot-card" data-testid="autopilot-card">
       <div className="row"><strong className="grow">⟳ {m.content}</strong>
         {a ? (a.enabled ? <Badge tone="ok">on</Badge> : <Badge tone="warn">paused</Badge>) : q.data ? <Badge>deleted</Badge> : null}</div>
       <div className="small">{d.schedule} · up to {fmtUsd(a?.run_cap_usd ?? d.run_cap_usd, 2)} per run, {fmtUsd(a?.daily_cap_usd ?? d.daily_cap_usd, 2)} per day</div>
       <div className="small muted">{d.objective}</div>
-      {a && <div className="small faint">{a.active_run ? "running now" : a.next_run_at ? `next: ${new Date(a.next_run_at).toLocaleString()}` : ""}
+      {stuck && (
+        <div className="callout warn small" data-testid="autopilot-stuck">
+          The last run ({new Date(stuck.created_at).toLocaleString()}) is {stuck.status} and needs you; no new run starts until it is finished or canceled.
+          <div className="row" style={{ marginTop: 6 }}>
+            <Button size="sm" variant="primary" onClick={async () => { setErr(null); try { await post(`/api/missions/${stuck.mission_id}/cancel`); q.reload(); } catch (e) { setErr((e as Error).message); } }}>Cancel stuck run</Button>
+            {err && <span style={{ color: "var(--bad)" }}>{err}</span>}
+          </div>
+        </div>
+      )}
+      {a && <div className="small faint">{stuck ? "waiting on you" : a.active_run ? "running now" : a.next_run_at ? `next: ${new Date(a.next_run_at).toLocaleString()}` : ""}
         {a.status_note ? ` · ${a.status_note}` : ""} · spent today {fmtUsd(a.spent_today_usd, 3)}</div>}
       {!a?.enabled && d.why_disabled && a && <div className="small" style={{ color: "var(--warn)" }}>{d.why_disabled}</div>}
       {a && <AutopilotControls a={a} reload={q.reload} globalDaily={q.data?.daily_limit_usd} />}
