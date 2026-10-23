@@ -51,7 +51,44 @@ def project_profile(db, project_id: str | None) -> dict[str, Any]:
         return dict(DEFAULT_PROFILE)
 
 
+def repo_sandbox_spec(root: Path) -> dict[str, Any] | None:
+    """A repository can describe its own test sandbox in .nexus/sandbox.json:
+    {"image": "name:tag", "dockerfile": "path/in/repo", "context": "path/in/repo", "memory_mb": …, "cpus": …,
+     "tmpfs_mb": …, "timeout_s": …}. Paths must stay inside the repository."""
+    import json
+
+    f = Path(root) / ".nexus" / "sandbox.json"
+    if not f.is_file():
+        return None
+    try:
+        spec = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(spec, dict):
+        return None
+    prof = clean_profile(spec)  # validates the image name
+    root = Path(root).resolve()
+    out: dict[str, Any] = {"profile": prof}
+    for k in ("dockerfile", "context"):
+        if spec.get(k):
+            p = (root / str(spec[k])).resolve()
+            if root not in p.parents and p != root:
+                raise ValueError(f"{k} escapes the repository")
+            out[k] = p
+    return out
+
+
 class DockerSandbox:
+    async def build(self, dockerfile: Path, context: Path, tag: str, *, timeout_s: float = 1800) -> tuple[bool, str]:
+        """Host-side image build from a repository's own Dockerfile (has network; runs in Docker's build sandbox)."""
+        if not self.docker:
+            return False, "docker CLI not found on PATH"
+        if not IMAGE_RE.match(tag):
+            return False, f"invalid image name {tag!r}"
+        rc, out, err = await self._run("build", "-q", "-f", str(dockerfile), "-t", tag, str(context), timeout=timeout_s)
+        self._cached.pop(tag, None)
+        return rc == 0, (out.strip() or err.strip())[-500:]
+
     def __init__(self, image: str = DEFAULT_PROFILE["image"], docker_bin: str | None = None):
         self.image = image
         self.docker = docker_bin or shutil.which("docker")

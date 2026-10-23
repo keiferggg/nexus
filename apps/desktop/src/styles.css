@@ -287,3 +287,8 @@ input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; }
 .nav-toggle { background: none; border: 0; text-align: left; cursor: pointer; width: 100%; font: inherit; }
 .dot-busy { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: blink 1.2s infinite; }
 @media (max-width: 900px) { .chat-examples { grid-template-columns: 1fr; } }
+.autopilot-card { width: min(100%, 760px); background: var(--bg-raised); border: 1px solid var(--border); border-left: 3px solid var(--sim);
+  border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.nav-item .ap-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex: none; }
+.nav-item .ap-dot.on { background: var(--ok); }
+.nav-item .ap-dot.run { background: var(--accent); animation: blink 1.2s infinite; }

@@ -221,8 +221,11 @@ def create_app(ctx: AppContext, *, token: str, allowed_origins: list[str] | None
         state["startup_report"] = await sup.start()
         narrator = Narrator(ctx, chat)
         narrator.start()
+        if os.environ.get("NEXUS_AUTOPILOT", "1") != "0":
+            chat.autopilot.start()
         state["started"] = True
         yield
+        await chat.autopilot.stop()
         await narrator.stop()
         await sup.stop()
 
@@ -919,6 +922,15 @@ def create_app(ctx: AppContext, *, token: str, allowed_origins: list[str] | None
     async def chat_start_mission(mid: str):
         await chat.start_proposed(mid)
         return views.mission_view(db, mid)
+
+    @app.get("/api/autopilot")
+    async def list_autopilot():
+        return {"standing": chat.autopilot.list(), "spent_today_usd": round(chat.autopilot._spent_today(), 4),
+                "daily_limit_usd": chat.autopilot.global_daily_limit()}
+
+    @app.post("/api/autopilot/{sid}/{op}")
+    async def autopilot_control(sid: str, op: str):
+        return chat.autopilot.control(sid, op)
 
     @app.get("/api/chat/status")
     async def chat_status():

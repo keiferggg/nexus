@@ -263,3 +263,23 @@ Total live spend across all missions: $1.56 (by owner-configured prices; not inv
   assertion: on Linux, `..\B\secret-plan.md` is an ordinary (nonexistent) filename, so it is denied as "not a file"
   rather than "escapes". The test now asserts the denial on every OS, and the escape message only where `\` is a
   separator. Windows: 84 passed; desktop app tests: 6 passed.
+
+## 0.2.12–0.2.13 — chat front door, Autopilot, self-describing repo sandboxes
+- **Chat** (`nexus/chat`): a concierge model with read-only web tools answers directly or drafts a live mission
+  (objective, checkable success conditions, estimate, cap). Missions within the owner's auto-start limit start at once;
+  bigger ones wait for a Start tap. A narrator posts the plan, finished steps, real actions, approvals (with inline
+  buttons) and the result back into the thread, deduplicated across restarts. Setup (provider, price, data
+  acknowledgement) happens inline; nothing is sent to a provider before the owner acknowledges. The model can only
+  register folders the owner typed. Daily chat budget. Tests: tests/service/test_chat.py (8).
+- **Autopilot** (`nexus/autopilot`): standing missions on interval, daily, watch (page change) and continuous
+  triggers. Runs never overlap; a run blocked on the owner pauses further runs; spending is bounded by the per-run cap,
+  the per-autopilot daily limit and the global autopilot daily limit (default $5). Watched-page text never enters
+  owner-authored fields (objective, conditions, constraints), which the action guard trusts for destinations: the
+  change is written to a workspace source file that agents read as untrusted data. Lines made only of numbers, dates
+  and times are ignored, so clocks and counters do not trigger runs. Created from chat ("every morning…"): enabled
+  only within the owner's limits, otherwise created paused. Tests: tests/service/test_autopilot.py (7), plus a chat test.
+- **Repository sandboxes**: a repo can describe its test sandbox in `.nexus/sandbox.json` (image, Dockerfile, limits;
+  paths must stay inside the repo). When chat starts work in that repo, NEXUS applies the profile and builds the image
+  first if it is missing. NEXUS's own repo includes one (`nexus-sandbox:py312`).
+- Service suite: 99 passed, 16 opt-in skipped. Desktop app tests: 7 passed.
+- Not yet run live: chat and Autopilot against the real DeepSeek API.

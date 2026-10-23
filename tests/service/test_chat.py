@@ -51,6 +51,16 @@ class Concierge:
                     "mission": {"title": "Larkspur bike-share brief", "objective": OBJ, "success_conditions": SC,
                                 "constraints": ["Use only workspace sources"], "project": proj,
                                 "estimate_usd": cap / 2, "cap_usd": cap}}
+        if text.startswith("autopilot"):
+            proj = next(p["id"] for p in context(req)["PROJECTS"] if p["name"] == "Larkspur")
+            big = "big" in text
+            return {"reply": "I'll do that every morning.", "action": "autopilot", "conversation_title": "Morning brief",
+                    "mission": {"title": "Morning brief", "objective": OBJ, "success_conditions": SC, "project": proj,
+                                "trigger": {"type": "daily", "at": "07:30"}, "run_cap_usd": 4.0 if big else 0.5,
+                                "daily_cap_usd": 8.0 if big else 1.0}}
+        if text.startswith("pause"):
+            a = context(req)["AUTOPILOTS"][0]
+            return {"reply": "Paused.", "action": "autopilot_control", "autopilot": {"id": a["id"], "op": "pause"}}
         if text.startswith("folder"):
             return {"reply": "Using that folder.", "action": "mission",
                     "mission": {"title": "x", "objective": "y", "success_conditions": ["z"],
@@ -182,3 +192,69 @@ async def test_daily_chat_budget_stops_chat_calls(env):
     cid = chat.create_conversation()["id"]
     r = await chat.send(cid, "what is 2+2?")
     assert r == {"error": "chat budget"} and sim.requests == 0, (r, sim.requests, chat._chat_spend_today())
+
+
+async def test_recurring_request_becomes_an_autopilot_within_limits(env, tmp_path):
+    c, sup, chat, pid, sim = env
+    configure(c, pid)
+    larkspur(c, tmp_path)
+    cid = chat.create_conversation()["id"]
+    r = await chat.send(cid, "autopilot: brief me every morning")
+    assert r == {"action": "autopilot", "standing_id": r["standing_id"], "enabled": True}
+    card = next(m for m in chat.messages(cid) if m["kind"] == "autopilot")
+    assert card["data"]["schedule"] == "every day at 07:30" and card["data"]["enabled"]
+    r2 = await chat.send(cid, "autopilot big: brief me every morning, thoroughly")
+    assert r2["enabled"] is False, "above the owner's limits: created paused, waits for Enable"
+    r3 = await chat.send(cid, "pause the morning brief")
+    assert r3["op"] == "pause"
+    assert not c.db.one("SELECT enabled FROM standing_missions WHERE id = ?", (r3["standing_id"],))["enabled"]
+
+
+class BuildableSandbox:
+    """Docker stand-in: the image is missing until build() is called."""
+
+    def __init__(self):
+        self.images, self.builds = set(), []
+
+    async def available(self, refresh=False, image=None):
+        return (image in self.images, "ok" if image in self.images else "missing")
+
+    async def build(self, dockerfile, context, tag, timeout_s=1800):
+        self.builds.append((str(dockerfile), str(context), tag))
+        self.images.add(tag)
+        return True, "built"
+
+    async def run(self, worktree, command, timeout_s=None, profile=None):
+        raise RuntimeError("not used")
+
+
+async def test_repo_sandbox_is_set_up_automatically_from_nexus_sandbox_json(env, tmp_path):
+    c, sup, chat, pid, sim = env
+    configure(c, pid)
+    repo = tmp_path / "myrepo"
+    shutil.copytree(fixtures_dir() / "demo-research", repo)
+    (repo / ".nexus").mkdir()
+    (repo / "docker").mkdir()
+    (repo / "docker" / "test.Dockerfile").write_text("FROM python:3.12-slim\n")
+    (repo / ".nexus" / "sandbox.json").write_text(json.dumps({"image": "myrepo-tests:1", "dockerfile": "docker/test.Dockerfile",
+                                                              "memory_mb": 1024, "timeout_s": 300}))
+    sb = BuildableSandbox()
+    c.sandbox = sb
+    with c.db.tx() as cur:
+        rp = create_project(cur, name="myrepo", workspace_root=str(repo.resolve()))
+    cid = chat.create_conversation()["id"]
+    await chat.ensure_repo_sandbox(rp, cid)
+    assert sb.builds and sb.builds[0][2] == "myrepo-tests:1" and sb.builds[0][0].endswith("test.Dockerfile")
+    from nexus.tools.sandbox import project_profile
+
+    prof = project_profile(c.db, rp)
+    assert prof["image"] == "myrepo-tests:1" and prof["memory_mb"] == 1024 and prof["timeout_s"] == 300
+    assert sup.sandbox_ok_by_project[rp] is True
+    assert any("Sandbox ready" in m["content"] for m in chat.messages(cid))
+    # a spec whose Dockerfile points outside the repository is refused
+    (repo / ".nexus" / "sandbox.json").write_text(json.dumps({"image": "x:1", "dockerfile": "../../evil.Dockerfile"}))
+    with c.db.tx() as cur:
+        rp2 = create_project(cur, name="other", workspace_root=str(repo.resolve()) + "")
+        cur.execute("UPDATE projects SET settings_json = '{}' WHERE id = ?", (rp2,))
+    await chat.ensure_repo_sandbox(rp2, cid)
+    assert len(sb.builds) == 1 and any("escapes the repository" in m["content"] for m in chat.messages(cid))

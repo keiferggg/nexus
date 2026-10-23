@@ -78,6 +78,8 @@ export default function App() {
   const missions = useApi<any[]>(ready && projectId ? `/api/projects/${projectId}/missions` : null, missionMatch, [ready]);
   const convs = useApi<any[]>(ready ? "/api/chat/conversations" : null,
     (e) => e.type === "chat.conversation_created" || e.type === "chat.conversation_archived" || e.type === "chat.idle", [ready]);
+  const autos = useApi<any>(ready ? "/api/autopilot" : null,
+    (e) => e.type.startsWith("autopilot.") || e.type === "mission.status", [ready]);
   const attention = useApi<any[]>(ready ? "/api/attention" : null,
     (e) => e.type.startsWith("attention.") || e.type === "task.transition" || e.type.startsWith("model_call.finished"), [ready]);
 
@@ -126,6 +128,15 @@ export default function App() {
                     onClick={() => setRoute({ view: "chat", conversationId: c.id })}>
               <span className="grow" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span>
               {c.busy && <span className="dot-busy" aria-label="working" />}
+            </button>
+          ))}
+          {(autos.data?.standing?.length ?? 0) > 0 && <div className="nav-label">Autopilot</div>}
+          {autos.data?.standing?.map((a: any) => (
+            <button key={a.id} className="nav-item" title={`${a.schedule}${a.status_note ? ` · ${a.status_note}` : ""}`}
+                    onClick={() => a.conversation_id && setRoute({ view: "chat", conversationId: a.conversation_id })}>
+              <span className={`ap-dot ${a.active_run ? "run" : a.enabled ? "on" : ""}`} aria-hidden />
+              <span className="grow" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.title}</span>
+              <span className="xs faint">{a.enabled ? "" : "paused"}</span>
             </button>
           ))}
           <button className="nav-label nav-toggle" aria-expanded={advanced}

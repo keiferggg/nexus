@@ -173,13 +173,16 @@ function ChatLimits() {
             <Field label="Daily budget for chat replies (USD)" htmlFor="cl3" hint={`spent today: ${fmtUsd(d.spent_today_usd, 3)}`}>
               <input id="cl3" type="number" min={0} step={0.25} value={f.daily_chat_usd}
                 onChange={(e) => { setF({ ...f, daily_chat_usd: e.target.value }); setSaved(false); }} /></Field>
+            <Field label="Autopilot: total per day (USD)" htmlFor="cl4" hint="All standing missions together, across all runs">
+              <input id="cl4" type="number" min={0} step={0.5} value={f.autopilot_daily_usd}
+                onChange={(e) => { setF({ ...f, autopilot_daily_usd: e.target.value }); setSaved(false); }} /></Field>
           </div>
           {err && <div className="callout bad small">{err}</div>}
           <div className="row"><Button variant="primary" onClick={async () => {
             setErr(null);
             try {
               await put("/api/settings/chat.limits", { value: { auto_start_usd: Number(f.auto_start_usd), max_cap_usd: Number(f.max_cap_usd),
-                daily_chat_usd: Number(f.daily_chat_usd) } });
+                daily_chat_usd: Number(f.daily_chat_usd), autopilot_daily_usd: Number(f.autopilot_daily_usd) } });
               setSaved(true); q.reload();
             } catch (e) { setErr((e as Error).message); }
           }}>Save limits</Button>{saved && <span className="small muted" role="status">Saved</span>}</div>

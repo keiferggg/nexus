@@ -1,0 +1,9 @@
+{
+  "image": "nexus-sandbox:py312",
+  "dockerfile": "services/nexus/packaging/sandbox.Dockerfile",
+  "context": "services/nexus",
+  "memory_mb": 2048,
+  "cpus": 2,
+  "tmpfs_mb": 1024,
+  "timeout_s": 600
+}

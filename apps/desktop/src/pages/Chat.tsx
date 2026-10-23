@@ -85,6 +85,7 @@ function Message({ m, openMission, openSettings, retry }: { m: any; openMission:
       case "attention": return <AttentionCard m={m} openMission={openMission} />;
       case "result": return <ResultCard m={m} openMission={openMission} />;
       case "setup": return <SetupCard m={m} retry={retry} openSettings={openSettings} />;
+      case "autopilot": return <AutopilotCard m={m} />;
       case "error": return <div className="bubble error" role="alert">{m.content}</div>;
       default: return <div className="bubble"><Doc text={m.content} /></div>;
     }
@@ -219,6 +220,37 @@ function SetupCard({ m, retry, openSettings }: { m: any; retry: () => void; open
         </div>)}
       {!resolved && need === "readiness" && <div><Button size="sm" onClick={openSettings}>Open Settings → Providers</Button></div>}
       {resolved && <div><Button variant="primary" size="sm" onClick={retry}>Send my message again</Button></div>}
+    </div>
+  );
+}
+
+export function AutopilotControls({ a, reload }: { a: any; reload: () => void }) {
+  const [err, setErr] = useState<string | null>(null);
+  const op = async (o: string) => { setErr(null); try { await post(`/api/autopilot/${a.id}/${o}`); reload(); } catch (e) { setErr((e as Error).message); } };
+  return (
+    <div className="row wrap">
+      {a.enabled ? <Button size="sm" onClick={() => op("pause")}>Pause</Button> : <Button size="sm" variant="primary" onClick={() => op("resume")}>Enable</Button>}
+      <Button size="sm" onClick={() => op("run_now")} disabled={!!a.active_run}>Run now</Button>
+      <Button size="sm" variant="ghost" onClick={() => { if (confirm(`Delete autopilot “${a.title}”? Past runs are kept.`)) void op("delete"); }}>Delete</Button>
+      {err && <span className="small" style={{ color: "var(--bad)" }}>{err}</span>}
+    </div>
+  );
+}
+
+function AutopilotCard({ m }: { m: any }) {
+  const d = m.data || {};
+  const q = useApi<any>("/api/autopilot", (e) => e.type.startsWith("autopilot.") || e.type.startsWith("mission."));
+  const a = (q.data?.standing ?? []).find((x: any) => x.id === d.standing_id);
+  return (
+    <div className="autopilot-card" data-testid="autopilot-card">
+      <div className="row"><strong className="grow">⟳ {m.content}</strong>
+        {a ? (a.enabled ? <Badge tone="ok">on</Badge> : <Badge tone="warn">paused</Badge>) : q.data ? <Badge>deleted</Badge> : null}</div>
+      <div className="small">{d.schedule} · up to {fmtUsd(d.run_cap_usd, 2)} per run, {fmtUsd(d.daily_cap_usd, 2)} per day</div>
+      <div className="small muted">{d.objective}</div>
+      {a && <div className="small faint">{a.active_run ? "running now" : a.next_run_at ? `next: ${new Date(a.next_run_at).toLocaleString()}` : ""}
+        {a.status_note ? ` · ${a.status_note}` : ""} · spent today {fmtUsd(a.spent_today_usd, 3)}</div>}
+      {!a?.enabled && d.why_disabled && a && <div className="small" style={{ color: "var(--warn)" }}>{d.why_disabled}</div>}
+      {a && <AutopilotControls a={a} reload={q.reload} />}
     </div>
   );
 }
