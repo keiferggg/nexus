@@ -13,9 +13,19 @@ let win: BrowserWindow | null = null;
 let svc: ServiceManager;
 let updater: Updater;
 const updatePrefsPath = () => path.join(app.getPath("userData"), "update-prefs.json");
-function updatePrefs(): { autoInstallOnQuit: boolean } {
-  try { return { autoInstallOnQuit: true, ...JSON.parse(fs.readFileSync(updatePrefsPath(), "utf8")) }; } catch { return { autoInstallOnQuit: true }; }
+interface UpdatePrefs { autoInstallOnQuit: boolean; autoRestart: boolean }
+const DEFAULT_PREFS: UpdatePrefs = { autoInstallOnQuit: true, autoRestart: true };
+function updatePrefs(): UpdatePrefs {
+  try { return { ...DEFAULT_PREFS, ...JSON.parse(fs.readFileSync(updatePrefsPath(), "utf8")) }; } catch { return { ...DEFAULT_PREFS }; }
 }
+function saveUpdatePrefs(patch: Partial<UpdatePrefs>): UpdatePrefs {
+  const next = { ...updatePrefs(), ...patch };
+  fs.writeFileSync(updatePrefsPath(), JSON.stringify(next));
+  return next;
+}
+// Seconds the "restarting to update" popup counts down before installing (tests shorten it).
+const UPDATE_COUNTDOWN_S = Math.max(1, Number(process.env.NEXUS_UPDATE_COUNTDOWN || 10));
+const withPrefs = (s: UpdateState) => ({ ...s, ...updatePrefs(), countdownSeconds: UPDATE_COUNTDOWN_S });
 
 const ALLOWED_METHODS = new Set(["GET", "POST", "PUT", "DELETE"]);
 function validPath(p: unknown): p is string {
@@ -147,12 +157,10 @@ function registerIpc() {
   ipcMain.handle("nexus:logTail", () => svc.logTail(20000));
   ipcMain.handle("nexus:revealLog", () => shell.showItemInFolder(logPath));
   ipcMain.handle("nexus:openActivity", () => shell.openPath(process.env.NEXUS_ACTIVITY_DIR || path.join(dataDir, "..", "activity")));
-  ipcMain.handle("nexus:updateState", () => ({ ...updater.state, autoInstallOnQuit: updatePrefs().autoInstallOnQuit }));
-  ipcMain.handle("nexus:checkUpdates", async () => updater.check());
-  ipcMain.handle("nexus:setAutoInstall", (_e, on: boolean) => {
-    fs.writeFileSync(updatePrefsPath(), JSON.stringify({ autoInstallOnQuit: !!on }));
-    return updatePrefs();
-  });
+  ipcMain.handle("nexus:updateState", () => withPrefs(updater.state));
+  ipcMain.handle("nexus:checkUpdates", async () => withPrefs(await updater.check()));
+  ipcMain.handle("nexus:setAutoInstall", (_e, on: boolean) => saveUpdatePrefs({ autoInstallOnQuit: !!on }));
+  ipcMain.handle("nexus:setAutoRestart", (_e, on: boolean) => saveUpdatePrefs({ autoRestart: !!on }));
   ipcMain.handle("nexus:applyUpdate", async () => {
     // Stop the service cleanly first (missions resume after restart via reconciliation).
     await svc.stop();
@@ -189,7 +197,7 @@ app.whenReady().then(async () => {
   } catch { /* no packaged metadata */ }
   updater = new Updater(app.getVersion(), feed, app.isPackaged || !!process.env.NEXUS_UPDATE_FEED,
     app.isPackaged ? "" : "running from source: updates come from your working copy");
-  updater.on("state", (s: UpdateState) => broadcast("nexus:update", { ...s, autoInstallOnQuit: updatePrefs().autoInstallOnQuit }));
+  updater.on("state", (s: UpdateState) => broadcast("nexus:update", withPrefs(s)));
   registerIpc();
   createWindow();
   void svc.start();

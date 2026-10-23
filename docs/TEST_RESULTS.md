@@ -327,3 +327,12 @@ Total live spend across all missions: $1.56 (by owner-configured prices; not inv
   model call.
 - Tests: test_old_tool_results_are_elided_but_recent_ones_stay_whole and
   test_each_run_posts_a_live_mission_card_into_its_chat. Service suite: 104 passed, 16 opt-in skipped.
+
+## 0.2.18 — updates install themselves
+- A published build is noticed within seconds: the app watches the update folder's latest.json (and polls every 2
+  minutes; it was every 30). A popup counts down 10 seconds, then the update is installed silently and NEXUS restarts.
+  "Update now" skips the wait; "Not now" skips that version until the next start (it still installs on quit if that
+  setting is on). Settings → Diagnostics → Updates has an on/off switch. The SHA-256 check is unchanged: a tampered
+  installer is refused and the popup says so.
+- Packaged-app tests (NEXUS_PACKAGED=1, dry-run installer): 4 passed, including "a newly published build is noticed
+  within seconds and installs itself after the countdown" (no click) and "Not now skips the countdown". UI tests: 7 passed.

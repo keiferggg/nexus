@@ -292,3 +292,7 @@ input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; }
 .nav-item .ap-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex: none; }
 .nav-item .ap-dot.on { background: var(--ok); }
 .nav-item .ap-dot.run { background: var(--accent); animation: blink 1.2s infinite; }
+.update-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); display: grid; place-items: center; z-index: 1000; }
+.update-popup { width: min(440px, calc(100vw - 32px)); background: var(--bg-raised); border: 1px solid var(--border-strong);
+  border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, .4); }
+.update-popup h3 { margin: 0; font-size: var(--fs-lg); }

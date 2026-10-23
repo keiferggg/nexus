@@ -44,14 +44,30 @@ export class Updater extends EventEmitter {
     this.emit("state", s);
   }
 
-  start(intervalMs = 30 * 60_000) {
+  private watcher: fs.FSWatcher | null = null;
+  private debounce: NodeJS.Timeout | null = null;
+
+  /** Checks now, every intervalMs, and, for a folder feed, as soon as latest.json changes (a new build is noticed
+   *  within seconds of being published). */
+  start(intervalMs = 2 * 60_000) {
     if (this.state.phase === "disabled") return;
     void this.check();
     this.timer = setInterval(() => void this.check(), intervalMs);
+    if (this.feed && !this.isUrl(this.feed)) {
+      try {
+        this.watcher = fs.watch(this.feed, (_ev, name) => {
+          if (name && name !== "latest.json") return;
+          if (this.debounce) clearTimeout(this.debounce);
+          this.debounce = setTimeout(() => void this.check(), 1500);  // latest.json is replaced by rename
+        });
+      } catch { /* folder missing or not watchable: polling still works */ }
+    }
   }
 
   stop() {
     if (this.timer) clearInterval(this.timer);
+    if (this.debounce) clearTimeout(this.debounce);
+    this.watcher?.close();
   }
 
   private isUrl(p: string) {

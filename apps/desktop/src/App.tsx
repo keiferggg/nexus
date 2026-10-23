@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { bridge, NexusEvent, onEvent, ServiceState, useApi } from "./api";
 import { Digest } from "./components/Autonomy";
-import { UpdateBanner } from "./components/Updates";
+import { UpdateBanner, UpdateCountdown } from "./components/Updates";
 import { Button, SimBadge, Status } from "./components/ui";
 import Chat from "./pages/Chat";
 import MissionPage from "./pages/Mission";
@@ -115,6 +115,7 @@ export default function App() {
         <ServiceBanner state={svc} streamOk={streamOk} />
         <UpdateBanner />
       </div>
+      <UpdateCountdown />
       <aside className="sidebar" aria-label="Navigation">
         <div className="brand"><span className="brand-mark" aria-hidden />NEXUS</div>
         <nav className="nav" aria-label="Main">

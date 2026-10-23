@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld("nexus", {
   updateState: () => ipcRenderer.invoke("nexus:updateState"),
   checkUpdates: () => ipcRenderer.invoke("nexus:checkUpdates"),
   applyUpdate: () => ipcRenderer.invoke("nexus:applyUpdate"),
+  setAutoRestart: (on: boolean) => ipcRenderer.invoke("nexus:setAutoRestart", on),
   setAutoInstall: (on: boolean) => ipcRenderer.invoke("nexus:setAutoInstall", on),
   onUpdate: (fn: Listener) => on("nexus:update", fn),
 });

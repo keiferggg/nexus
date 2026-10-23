@@ -39,6 +39,7 @@ interface Bridge {
   checkUpdates(): Promise<any>;
   applyUpdate(): Promise<{ ok: boolean; error?: string }>;
   setAutoInstall(on: boolean): Promise<any>;
+  setAutoRestart(on: boolean): Promise<any>;
   onUpdate(fn: (s: any) => void): () => void;
 }
 

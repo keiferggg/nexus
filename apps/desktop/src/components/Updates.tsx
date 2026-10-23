@@ -56,12 +56,65 @@ export function UpdatesPanel() {
             <label className="row small"><input type="checkbox" checked={!!s.autoInstallOnQuit}
               onChange={async (e) => { await bridge().setAutoInstall(e.target.checked); setS({ ...s, autoInstallOnQuit: e.target.checked }); }} />
               Install updates automatically when I close NEXUS</label>
-            <div><Button size="sm" disabled={checking} onClick={async () => { setChecking(true); setS({ ...(await bridge().checkUpdates()), autoInstallOnQuit: s.autoInstallOnQuit }); setChecking(false); }}>
+            <label className="row small"><input type="checkbox" checked={!!s.autoRestart}
+              onChange={async (e) => { await bridge().setAutoRestart(e.target.checked); setS({ ...s, autoRestart: e.target.checked }); }} />
+              When an update is ready, restart and install it automatically after a {s.countdownSeconds ?? 10}-second countdown</label>
+            <div><Button size="sm" disabled={checking} onClick={async () => { setChecking(true); setS(await bridge().checkUpdates()); setChecking(false); }}>
               {checking ? "Checking…" : "Check for updates"}</Button></div>
             <div className="small faint">Updates are verified by SHA-256 before they run. Your data (%APPDATA%\NEXUS) and saved keys are never touched by an update.</div>
           </>
         )}
       </div>
     </Card>
+  );
+}
+
+/** When an update is published: a popup counts down, then NEXUS installs it and restarts itself. "Not now" skips
+ *  this version until the next start (it still installs on quit if that is on). Running missions resume. */
+export function UpdateCountdown() {
+  const [s] = useUpdate();
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const [left, setLeft] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [applying, setApplying] = useState(false);
+  const version = s?.phase === "available" ? s.version : null;
+  const show = !!version && !!s?.autoRestart && dismissed !== version && !err;
+
+  useEffect(() => { setLeft(show ? Number(s?.countdownSeconds ?? 10) : null); }, [show, version]);  // restart only for a new version
+  useEffect(() => {
+    if (left === null || applying) return;
+    if (left <= 0) {
+      setApplying(true);
+      void bridge().applyUpdate().then((r) => { if (!r.ok) { setErr(r.error ?? "update failed"); setApplying(false); } });
+      return;
+    }
+    const t = window.setTimeout(() => setLeft(left - 1), 1000);
+    return () => window.clearTimeout(t);
+  }, [left, applying]);
+
+  if (err && version) {
+    return (
+      <div className="update-overlay" role="alertdialog" aria-label="Update failed" data-testid="update-popup">
+        <div className="update-popup"><h3>Update {version} could not be installed</h3>
+          <div className="small">{err}</div>
+          <div className="row"><Button onClick={() => { setDismissed(version); setErr(null); }}>OK</Button></div></div>
+      </div>
+    );
+  }
+  if (!show || left === null) return null;
+  const total = Number(s?.countdownSeconds ?? 10);
+  return (
+    <div className="update-overlay" role="alertdialog" aria-label="Update ready" data-testid="update-popup">
+      <div className="update-popup">
+        <h3>NEXUS {version} is ready</h3>
+        <div className="small muted">You have {s.current}. {applying ? "Installing — NEXUS will restart by itself." :
+          `Restarting to update in ${left} second${left === 1 ? "" : "s"}.`} Your chats, data and keys are kept; running missions pick up where they left off.</div>
+        <div className="progress-bar"><div style={{ width: `${applying ? 100 : (100 * (total - left)) / total}%` }} /></div>
+        <div className="row">
+          <Button variant="primary" disabled={applying} onClick={() => setLeft(0)}>{applying ? "Installing…" : "Update now"}</Button>
+          <Button disabled={applying} onClick={() => setDismissed(version)}>Not now</Button>
+        </div>
+      </div>
+    </div>
   );
 }
